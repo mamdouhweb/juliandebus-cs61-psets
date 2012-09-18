@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <string.h>
-// test020: check for wild writes off the end of the allocated block.
+// test020: check for boundary write errors off the end of an allocated block.
 
 int main() {
     int *ptr = (int *) malloc(sizeof(int) * 10);
