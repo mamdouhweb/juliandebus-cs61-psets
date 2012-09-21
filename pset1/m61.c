@@ -14,20 +14,24 @@ unsigned long long fail_size;	// # bytes in failed alloc attempts
 
 void *m61_malloc(size_t sz, const char *file, int line) {
     (void) file, (void) line;	// avoid uninitialized variable warnings
+	metadata *meta_ptr=malloc(sizeof(metadata)+sz);
+	if(NULL==meta_ptr){
+		++fail_count;
+		fail_size+=(unsigned long long)sz;
+		return NULL;
+	}
 	++total_count;
 	++active_count;
 	total_size+=sz;
 	active_size+=(unsigned long long)sz;
-
-	metadata *meta_ptr=malloc(sizeof(metadata)+sz);
 	meta_ptr->sz=sz;
 	return meta_ptr + 1; 
 }
 
 void m61_free(void *ptr, const char *file, int line) {
     (void) file, (void) line;	// avoid uninitialized variable warnings
-    if(ptr){
-		--active_count;
+    if(NULL!=ptr){
+	    	--active_count;
 		metadata *meta_ptr=ptr;
 		meta_ptr-=1;
 		active_size-=(unsigned long long)(meta_ptr->sz);
@@ -54,6 +58,8 @@ void m61_getstatistics(struct m61_statistics *stats) {
 	stats->total_size=total_size;
 	stats->active_size=active_size;
 	stats->active_count=active_count;
+	stats->fail_count=fail_count;
+	stats->fail_size=fail_size;
 }
 
 void m61_printstatistics(void) {
