@@ -16,6 +16,10 @@ struct m61_statistics {
     unsigned long long fail_size;	// # bytes in failed alloc attempts
 };
 
+typedef struct metadata {
+   size_t sz;
+}metadata;
+
 void m61_getstatistics(struct m61_statistics *stats);
 void m61_printstatistics(void);
 void m61_printleakreport(void);
