@@ -17,8 +17,13 @@ struct m61_statistics {
 };
 
 typedef struct metadata {
-   size_t sz;
+    size_t sz;
+    uintptr_t sz_ptr;
 }metadata;
+
+typedef struct backpack {
+    uintptr_t sz_ptr;
+}backpack;
 
 void m61_getstatistics(struct m61_statistics *stats);
 void m61_printstatistics(void);

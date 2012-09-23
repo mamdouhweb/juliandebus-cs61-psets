@@ -12,43 +12,102 @@ unsigned long long total_size;	// # bytes in total allocations
 unsigned long long fail_count;	// # failed allocation attempts
 unsigned long long fail_size;	// # bytes in failed alloc attempts
 
+metadata *getMetadata(void *ptr){
+    metadata *meta_ptr=ptr;
+    meta_ptr-=1;
+    return meta_ptr;    
+}
+
+//Returns the maximum size that a variable with type size_t can have in order to be malloced with the struct 'metadata'
+size_t maximumSizeValid(){
+    return (size_t)-1-sizeof(metadata);
+}
+
+//Checks whether ptr points to an address that is in the heap
+unsigned short int addressIsInHeap(void *ptr){
+    //stub
+    return 1;
+}
+
+metadata *addressOfMetadata(void *ptr){
+    metadata *meta_ptr=ptr;
+    return meta_ptr-=1;
+}
+
+void allocationFailedWithSize(size_t sz){
+    ++fail_count;
+    fail_size+=(unsigned long long)sz;
+}
+
 void *m61_malloc(size_t sz, const char *file, int line) {
     (void) file, (void) line;	// avoid uninitialized variable warnings
-	metadata *meta_ptr=malloc(sizeof(metadata)+sz);
-	if(NULL==meta_ptr){
-		++fail_count;
-		fail_size+=(unsigned long long)sz;
+	//Is this acceptable? Alternative? 
+    if(sz>maximumSizeValid()){
+        allocationFailedWithSize(sz);
+	    return NULL;
+    }
+	    
+    metadata *meta_ptr=malloc(sizeof(metadata)+sz+sizeof(backpack));
+	if(meta_ptr==NULL){
+        allocationFailedWithSize(sz);
 		return NULL;
 	}
 	++total_count;
 	++active_count;
 	total_size+=sz;
 	active_size+=(unsigned long long)sz;
-	meta_ptr->sz=sz;
+	//save size and address of metadata struct
+    meta_ptr->sz=sz;
+    meta_ptr->sz_ptr=(uintptr_t)meta_ptr;
+    ////save address of metadata struct to backpack
+    //char *start_ptr=(char *)meta_ptr;
+    //backpack *backpack_ptr=(backpack *)start_ptr+sizeof(metadata)+sz;
+    //backpack_ptr->sz_ptr=(uintptr_t)meta_ptr;
 	return meta_ptr + 1; 
 }
 
 void m61_free(void *ptr, const char *file, int line) {
     (void) file, (void) line;	// avoid uninitialized variable warnings
-    if(NULL!=ptr){
-	    	--active_count;
-		metadata *meta_ptr=ptr;
-		meta_ptr-=1;
-		active_size-=(unsigned long long)(meta_ptr->sz);
-		free(meta_ptr);
-	}
+    if(NULL==ptr){
+        return;   
+    }
+    //double free: neither metadata nor backpack point to metadata (everything's been freed) 
+    //invalid free: to be calculated: max=max(stack) min=global?
+    //boundary write either metadata or backpack do not point to metadata
+    metadata *meta_ptr=addressOfMetadata(ptr);
+   	--active_count;
+   	active_size-=(unsigned long long)(meta_ptr->sz);
+   	free(meta_ptr);
 }
 
 void *m61_realloc(void *ptr, size_t sz, const char *file, int line) {
     (void) file, (void) line;	// avoid uninitialized variable warnings
-    // Your code here.
-    return realloc(ptr, sz);
+    void *new_ptr = NULL;
+    if (sz != 0)
+        new_ptr = m61_malloc(sz,file,line);
+    if (ptr != NULL && new_ptr != NULL) {
+            metadata *meta_ptr=addressOfMetadata(ptr); 
+            size_t old_sz = meta_ptr->sz;
+            if (old_sz < sz)
+             memcpy(new_ptr, ptr, old_sz);
+        else
+             memcpy(new_ptr, ptr, sz);
+    }
+    m61_free(ptr,file, line);
+    return new_ptr;
 }
 
 void *m61_calloc(size_t nmemb, size_t sz, const char *file, int line) {
     (void) file, (void) line;	// avoid uninitialized variable warnings
-    // Your code here.
-    return calloc(nmemb, sz);
+    if (sz>maximumSizeValid()/nmemb){
+        ++fail_count;
+	fail_size+=(unsigned long long)sz;
+        return NULL;
+    }
+    void *ptr = m61_malloc(sz * nmemb, file, line);
+    if (ptr != NULL)
+	memset(ptr, 0, sz * nmemb);     // clear memory to 0
+    return ptr;
 }
 
 void m61_getstatistics(struct m61_statistics *stats) {
