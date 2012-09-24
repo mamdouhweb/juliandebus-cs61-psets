@@ -19,6 +19,7 @@ struct m61_statistics {
 typedef struct metadata {
     size_t sz;
     uintptr_t sz_ptr;
+    int previously_freed;
 }metadata;
 
 typedef struct backpack {

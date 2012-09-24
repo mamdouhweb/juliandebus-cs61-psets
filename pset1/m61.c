@@ -31,7 +31,7 @@ unsigned short int addressIsInHeap(void *ptr){
     char a;
     if((void *)&a<ptr)
         return 0;
-    if(&active_size>ptr)
+    if((void *)&active_size>ptr)
         return 0;
     return 1;
 }
@@ -63,13 +63,15 @@ void *m61_malloc(size_t sz, const char *file, int line) {
 	++active_count;
 	total_size+=sz;
 	active_size+=(unsigned long long)sz;
-	//save size and address of metadata struct
+	//save size and address of metadata struct to metadata
     meta_ptr->sz=sz;
     meta_ptr->sz_ptr=(uintptr_t)meta_ptr;
+    meta_ptr->previously_freed=0;
     //save address of metadata struct to backpack
     char *start_ptr=(char *)meta_ptr;
-    backpack *backpack_ptr=(backpack *)start_ptr+sizeof(metadata)+sz;
+    backpack *backpack_ptr=(backpack *)(start_ptr+sz+sizeof(metadata));
     backpack_ptr->sz_ptr=(uintptr_t)meta_ptr;
+    //printf("%p %p\n",meta_ptr+1,backpack_ptr);
 	return meta_ptr + 1; 
 }
 
@@ -83,21 +85,36 @@ void m61_free(void *ptr, const char *file, int line) {
         return;
     }
     metadata *meta_ptr=addressOfMetadata(ptr);
-    unsigned short int metadataIsValid=(meta_ptr==meta_ptr->sz_ptr);
-    if(!metadataIsValid){
-        printf("MEMORY BUG!!!!!!");
+    if(meta_ptr->previously_freed){
+        printf("MEMORY BUG: %s:%i: double free of pointer %p\n",file,line,ptr);
         return;
     }
+    unsigned short int metadataIsValid=(meta_ptr==(metadata *)meta_ptr->sz_ptr);
+    //construct backpack pointer
+    char *start_ptr=(char *)ptr;
+    backpack *backpack_ptr=(backpack *)(start_ptr+meta_ptr->sz);
+    unsigned short int backpackIsValid=(meta_ptr==(metadata *)backpack_ptr->sz_ptr);
+    
+    if(!metadataIsValid&&!backpackIsValid){
+        printf("MEMORY BUG: %s:%i: invalid free of pointer %p, not allocated\n",file,line,ptr);
+        return;
+    }
+    //if((!backpackIsValid&&metadataIsValid)||(backpackIsValid&&!metadataIsValid)){
+    //    printf("MEMORY BUG: %s:%i: boundary write error!\n",file,line);
+    //}
     
    	--active_count;
     size_t sz=meta_ptr->sz;
    	active_size-=(unsigned long long)sz;
-//    printf("%d",metadataValid);
+    
     //double free: neither metadata nor backpack point to metadata (everything's been freed) 
     //invalid free: to be calculated: max=max(stack) min=global?
     //assert(metadataValid);
     //boundary write either metadata or backpack do not point to metadata
+    meta_ptr->sz_ptr=0;
+    backpack_ptr->sz_ptr=0;
    	free(meta_ptr);
+    meta_ptr->previously_freed=1;
 }
 
 void *m61_realloc(void *ptr, size_t sz, const char *file, int line) {
