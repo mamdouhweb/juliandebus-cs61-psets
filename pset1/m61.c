@@ -5,6 +5,9 @@
 #include <stdio.h>
 #include <inttypes.h>
 
+//REMOVE LATER!!
+#include <assert.h>
+
 unsigned long long active_count;	// # active allocations
 unsigned long long active_size;	// # bytes in active allocations
 unsigned long long total_count;	// # total allocations
@@ -25,7 +28,11 @@ size_t maximumSizeValid(){
 
 //Checks whether ptr points to an address that is in the heap
 unsigned short int addressIsInHeap(void *ptr){
-    //stub
+    char a;
+    if((void *)&a<ptr)
+        return 0;
+    if(&active_size>ptr)
+        return 0;
     return 1;
 }
 
@@ -59,10 +66,10 @@ void *m61_malloc(size_t sz, const char *file, int line) {
 	//save size and address of metadata struct
     meta_ptr->sz=sz;
     meta_ptr->sz_ptr=(uintptr_t)meta_ptr;
-    ////save address of metadata struct to backpack
-    //char *start_ptr=(char *)meta_ptr;
-    //backpack *backpack_ptr=(backpack *)start_ptr+sizeof(metadata)+sz;
-    //backpack_ptr->sz_ptr=(uintptr_t)meta_ptr;
+    //save address of metadata struct to backpack
+    char *start_ptr=(char *)meta_ptr;
+    backpack *backpack_ptr=(backpack *)start_ptr+sizeof(metadata)+sz;
+    backpack_ptr->sz_ptr=(uintptr_t)meta_ptr;
 	return meta_ptr + 1; 
 }
 
@@ -71,12 +78,25 @@ void m61_free(void *ptr, const char *file, int line) {
     if(NULL==ptr){
         return;   
     }
+    if(!addressIsInHeap(ptr)){
+        printf("MEMORY BUG: %s:%i: invalid free of pointer %p, not in heap\n",file,line,ptr);
+        return;
+    }
+    metadata *meta_ptr=addressOfMetadata(ptr);
+    unsigned short int metadataIsValid=(meta_ptr==meta_ptr->sz_ptr);
+    if(!metadataIsValid){
+        printf("MEMORY BUG!!!!!!");
+        return;
+    }
+    
+   	--active_count;
+    size_t sz=meta_ptr->sz;
+   	active_size-=(unsigned long long)sz;
+//    printf("%d",metadataValid);
     //double free: neither metadata nor backpack point to metadata (everything's been freed) 
     //invalid free: to be calculated: max=max(stack) min=global?
+    //assert(metadataValid);
     //boundary write either metadata or backpack do not point to metadata
-    metadata *meta_ptr=addressOfMetadata(ptr);
-   	--active_count;
-   	active_size-=(unsigned long long)(meta_ptr->sz);
    	free(meta_ptr);
 }
 
