@@ -15,15 +15,25 @@ unsigned long long total_size;	// # bytes in total allocations
 unsigned long long fail_count;	// # failed allocation attempts
 unsigned long long fail_size;	// # bytes in failed alloc attempts
 
+metadata rootMetadata;
+metadata *firstAlloc;
+metadata *lastAlloc;
+
 metadata *getMetadata(void *ptr){
-    metadata *meta_ptr=ptr;
-    meta_ptr-=1;
-    return meta_ptr;    
+    metadata *meta_ptr=(metadata *)ptr;
+    --meta_ptr;
+    return meta_ptr;
 }
 
-//Returns the maximum size that a variable with type size_t can have in order to be malloced with the struct 'metadata'
+void *getPayload(metadata *ptr){
+    metadata *meta_ptr=ptr;
+    ++meta_ptr;
+    return meta_ptr;
+}
+
+//Returns the maximum size that a variable with type size_t can have in order to be malloced with the structs 'metadata' and 'backpack'
 size_t maximumSizeValid(){
-    return (size_t)-1-sizeof(metadata);
+    return (size_t)-1-sizeof(metadata)-sizeof(backpack);
 }
 
 //Checks whether ptr points to an address that is in the heap
@@ -31,14 +41,9 @@ unsigned short int addressIsInHeap(void *ptr){
     char a;
     if((void *)&a<ptr)
         return 0;
-    if((void *)&active_size>ptr)
+    if((void *)&active_size>ptr) //ATTENTION: THIS IS PROBABLY NOT CORRECT
         return 0;
     return 1;
-}
-
-metadata *addressOfMetadata(void *ptr){
-    metadata *meta_ptr=ptr;
-    return meta_ptr-=1;
 }
 
 void allocationFailedWithSize(size_t sz){
@@ -59,20 +64,27 @@ void *m61_malloc(size_t sz, const char *file, int line) {
         allocationFailedWithSize(sz);
 		return NULL;
 	}
-	++total_count;
+
+    if(lastAlloc!=NULL){
+        meta_ptr->prv=lastAlloc;
+        lastAlloc->next=meta_ptr;
+    }
+    lastAlloc=meta_ptr;
+    
+    ++total_count;
 	++active_count;
 	total_size+=sz;
 	active_size+=(unsigned long long)sz;
 	//save size and address of metadata struct to metadata
     meta_ptr->sz=sz;
-    meta_ptr->sz_ptr=(uintptr_t)meta_ptr;
+    meta_ptr->self=meta_ptr;
     meta_ptr->previously_freed=0;
     //save address of metadata struct to backpack
-    char *start_ptr=(char *)meta_ptr;
-    backpack *backpack_ptr=(backpack *)(start_ptr+sz+sizeof(metadata));
-    backpack_ptr->sz_ptr=(uintptr_t)meta_ptr;
+    //char *start_ptr=(char *)meta_ptr;
+    backpack *backpack_ptr=(backpack *)((char *)meta_ptr+sz+sizeof(metadata));
+    backpack_ptr->self=backpack_ptr;
     //printf("%p %p\n",meta_ptr+1,backpack_ptr);
-	return meta_ptr + 1; 
+	return getPayload(meta_ptr); 
 }
 
 void m61_free(void *ptr, const char *file, int line) {
@@ -84,37 +96,61 @@ void m61_free(void *ptr, const char *file, int line) {
         printf("MEMORY BUG: %s:%i: invalid free of pointer %p, not in heap\n",file,line,ptr);
         return;
     }
-    metadata *meta_ptr=addressOfMetadata(ptr);
+    metadata *meta_ptr=getMetadata(ptr);
     if(meta_ptr->previously_freed){
         printf("MEMORY BUG: %s:%i: double free of pointer %p\n",file,line,ptr);
+        printf("  %s:%i: pointer %p previously freed here\n",meta_ptr->file,meta_ptr->line,ptr);
         return;
     }
-    unsigned short int metadataIsValid=(meta_ptr==(metadata *)meta_ptr->sz_ptr);
+    unsigned short int metadataIsValid=(meta_ptr==meta_ptr->self);
     //construct backpack pointer
-    //char *start_ptr=(char *)ptr;
     backpack *backpack_ptr=(backpack *)((char *)ptr+meta_ptr->sz);
-    unsigned short int backpackIsValid=(meta_ptr==(metadata *)backpack_ptr->sz_ptr);
+    unsigned short int backpackIsValid=(backpack_ptr==backpack_ptr->self);
     
     if(!metadataIsValid&&!backpackIsValid){
         printf("MEMORY BUG: %s:%i: invalid free of pointer %p, not allocated\n",file,line,ptr);
         return;
     }
-    //if((!backpackIsValid&&metadataIsValid)||(backpackIsValid&&!metadataIsValid)){
-    //    printf("MEMORY BUG: %s:%i: boundary write error!\n",file,line);
-    //}
+    //this is basically an XOR since 1&&1 will be caught above
+    if(!metadataIsValid||!backpackIsValid){
+        printf("MEMORY BUG: %s:%i: boundary write error!\n",file,line);
+    }
     
    	--active_count;
     size_t sz=meta_ptr->sz;
    	active_size-=(unsigned long long)sz;
     
-    //double free: neither metadata nor backpack point to metadata (everything's been freed) 
-    //invalid free: to be calculated: max=max(stack) min=global?
-    //assert(metadataValid);
-    //boundary write either metadata or backpack do not point to metadata
-    meta_ptr->sz_ptr=0;
-    backpack_ptr->sz_ptr=0;
+    meta_ptr->self=NULL;
+    backpack_ptr->self=NULL;
    	free(meta_ptr);
+    
+    meta_ptr->file=file;
+    meta_ptr->line=line;
     meta_ptr->previously_freed=1;
+    
+    metadata *prv=meta_ptr->prv;
+    metadata *next=meta_ptr->next;
+    if(next==NULL){
+        lastAlloc=prv;    
+    }
+    if(prv){
+        prv->next=next;
+        if(next){
+            next->prv=prv;
+        }
+        else{
+            lastAlloc=prv;
+        } 
+    }
+    else{
+        firstAlloc=next;
+        if(next){
+            next->prv=prv;
+        }
+        else{
+            lastAlloc=NULL;
+        }
+    }
 }
 
 void *m61_realloc(void *ptr, size_t sz, const char *file, int line) {
@@ -123,7 +159,7 @@ void *m61_realloc(void *ptr, size_t sz, const char *file, int line) {
     if (sz != 0)
         new_ptr = m61_malloc(sz,file,line);
     if (ptr != NULL && new_ptr != NULL) {
-            metadata *meta_ptr=addressOfMetadata(ptr); 
+            metadata *meta_ptr=getMetadata(ptr); 
             size_t old_sz = meta_ptr->sz;
             if (old_sz < sz)
              memcpy(new_ptr, ptr, old_sz);

@@ -17,27 +17,17 @@ struct m61_statistics {
 };
 
 typedef struct metadata {
+    struct metadata *prv;
+    struct metadata *next;
     size_t sz;
-    uintptr_t sz_ptr;
-    int previously_freed;
-}metadata;
-
-typedef struct metadata_free {
     const char *file;
     int line;
-    int previously_freed;
-}metadata_free;
-
-//Schlaf drüber! Idee: Union was Metadata und metadata_free enthält um Speicher zu sparen
-//Je nachdem in welchem Teil des Programmes man sich befindet wird Speicher als 'struct metadata' oder 'struct metadata_free' interpretiert
-//--> Speicherersparnis
-typedef union metadata_memory {
-    metadata u_metadata;
-    metadata_free u_metadata_free;
-}metadata_memory; 
+    struct metadata *self;
+    unsigned short int previously_freed;
+}metadata;
 
 typedef struct backpack {
-    uintptr_t sz_ptr;
+    struct backpack *self; 
 }backpack;
 
 void m61_getstatistics(struct m61_statistics *stats);
