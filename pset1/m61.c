@@ -51,6 +51,16 @@ void allocationFailedWithSize(size_t sz){
     fail_size+=(unsigned long long)sz;
 }
 
+metadata *scanMemoryForAllocation(void *ptr){
+   if(!addressIsInHeap(ptr))
+       return NULL;
+   metadata *meta_ptr=(metadata *)ptr;
+   if(meta_ptr->self==meta_ptr)
+      return meta_ptr; 
+   else 
+      return scanMemoryForAllocation(--ptr);
+}
+
 void *m61_malloc(size_t sz, const char *file, int line) {
     (void) file, (void) line;	// avoid uninitialized variable warnings
 	//Is this acceptable? Alternative? 
@@ -114,9 +124,15 @@ void m61_free(void *ptr, const char *file, int line) {
     
     if(!metadataIsValid&&!backpackIsValid){
         printf("MEMORY BUG: %s:%i: invalid free of pointer %p, not allocated\n",file,line,ptr);
+        metadata *frontAlloc=scanMemoryForAllocation(meta_ptr);
+        char *offset=(char *)meta_ptr-(char *)frontAlloc;
+        if(frontAlloc!=NULL&&offset<sizeof(metadata)+frontAlloc->sz+sizeof(backpack)){
+            printf("  %s:%i: %p is %zu bytes inside a %zu byte region allocated here\n",frontAlloc->file,frontAlloc->line,ptr,(char *)meta_ptr-(char *)frontAlloc,frontAlloc->sz);
+            return;
+        }
         return;
     }
-    //this is basically an XOR since 1&&1 will be caught above
+    //this is basically an XOR since 1||1 will be caught by the AND  above
     if(!metadataIsValid||!backpackIsValid){
         printf("MEMORY BUG: %s:%i: detected wild write during free of pointer %p\n",file,line,ptr);
         printf("MEMORY BUG: %s:%i: boundary write error!\n",file,line);
@@ -212,7 +228,7 @@ malloc size:  active %10llu   total %10llu   fail %10llu\n",
 
 void leakTraverse(metadata *ptr){
     if(ptr)
-        printf("LEAK CHECK: %s:%d: allocated object %p with size %zu\n",ptr->file,ptr->line,ptr,ptr->sz);
+        printf("LEAK CHECK: %s:%d: allocated object %p with size %zu\n",ptr->file,ptr->line,getPayload(ptr),ptr->sz);
     if(ptr->next)
         leakTraverse(ptr->next);
    return; 
