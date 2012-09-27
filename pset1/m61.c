@@ -91,8 +91,8 @@ void m61_free(void *ptr, const char *file, int line) {
     }
     unsigned short int metadataIsValid=(meta_ptr==(metadata *)meta_ptr->sz_ptr);
     //construct backpack pointer
-    char *start_ptr=(char *)ptr;
-    backpack *backpack_ptr=(backpack *)(start_ptr+meta_ptr->sz);
+    //char *start_ptr=(char *)ptr;
+    backpack *backpack_ptr=(backpack *)((char *)ptr+meta_ptr->sz);
     unsigned short int backpackIsValid=(meta_ptr==(metadata *)backpack_ptr->sz_ptr);
     
     if(!metadataIsValid&&!backpackIsValid){

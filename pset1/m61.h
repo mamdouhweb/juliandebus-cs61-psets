@@ -22,6 +22,20 @@ typedef struct metadata {
     int previously_freed;
 }metadata;
 
+typedef struct metadata_free {
+    const char *file;
+    int line;
+    int previously_freed;
+}metadata_free;
+
+//Schlaf drüber! Idee: Union was Metadata und metadata_free enthält um Speicher zu sparen
+//Je nachdem in welchem Teil des Programmes man sich befindet wird Speicher als 'struct metadata' oder 'struct metadata_free' interpretiert
+//--> Speicherersparnis
+typedef union metadata_memory {
+    metadata u_metadata;
+    metadata_free u_metadata_free;
+}metadata_memory; 
+
 typedef struct backpack {
     uintptr_t sz_ptr;
 }backpack;
