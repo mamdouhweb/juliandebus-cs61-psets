@@ -64,13 +64,16 @@ void *m61_malloc(size_t sz, const char *file, int line) {
         allocationFailedWithSize(sz);
 		return NULL;
 	}
-
-    if(lastAlloc!=NULL){
-        meta_ptr->prv=lastAlloc;
+    
+    if(firstAlloc==NULL){
+       firstAlloc=meta_ptr; 
+    }
+    if(lastAlloc){
         lastAlloc->next=meta_ptr;
+        meta_ptr->prv=lastAlloc;
     }
     lastAlloc=meta_ptr;
-    
+      
     ++total_count;
 	++active_count;
 	total_size+=sz;
@@ -113,6 +116,7 @@ void m61_free(void *ptr, const char *file, int line) {
     }
     //this is basically an XOR since 1&&1 will be caught above
     if(!metadataIsValid||!backpackIsValid){
+        printf("MEMORY BUG: %s:%i: detected wild write during free of pointer %p\n",file,line,ptr);
         printf("MEMORY BUG: %s:%i: boundary write error!\n",file,line);
     }
     
@@ -204,6 +208,15 @@ malloc size:  active %10llu   total %10llu   fail %10llu\n",
 	   stats.active_size, stats.total_size, stats.fail_size);
 }
 
+void leakTraverse(metadata *ptr){
+    if(ptr)
+        printf("LEAK CHECK: %s:%d: allocated object %p with size %llu\n",ptr->file,ptr->line,ptr,ptr->sz);
+    if(ptr->next)
+        leakTraverse(ptr->next);
+   return; 
+}
+
 void m61_printleakreport(void) {
-    // Your code here.
+   if(firstAlloc)
+      leakTraverse(firstAlloc); 
 }
