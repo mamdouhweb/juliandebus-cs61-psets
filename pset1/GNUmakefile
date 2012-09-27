@@ -2,7 +2,7 @@ CC = $(shell if test -f /opt/local/bin/gcc-mp-4.7; then \
 	    echo gcc-mp-4.7; else echo gcc; fi)
 CFLAGS = -std=gnu99 -g -W -Wall
 
-TESTS = $(patsubst %.c,%,$(wildcard test[0-9][0-9][0-9].c))
+TESTS = $(patsubst %.c,%,$(sort $(wildcard test[0-9][0-9][0-9].c)))
 
 %.o: %.c m61.h
 	$(CC) $(CFLAGS) -o $@ -c $<
