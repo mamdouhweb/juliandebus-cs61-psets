@@ -155,6 +155,10 @@ void m61_free(void *ptr, const char *file, int line) {
         lastAlloc=prv;    
     }
     if(prv){
+        if(prv->next!=meta_ptr){
+            printf("MEMORY BUG%s:%i: invalid free of pointer %p",file,line,ptr);
+            return;
+        }
         prv->next=next;
         if(next){
             next->prv=prv;
