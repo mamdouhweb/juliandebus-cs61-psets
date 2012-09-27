@@ -82,6 +82,8 @@ void *m61_malloc(size_t sz, const char *file, int line) {
     meta_ptr->sz=sz;
     meta_ptr->self=meta_ptr;
     meta_ptr->previously_freed=0;
+    meta_ptr->file=file;
+    meta_ptr->line=line;
     //save address of metadata struct to backpack
     //char *start_ptr=(char *)meta_ptr;
     backpack *backpack_ptr=(backpack *)((char *)meta_ptr+sz+sizeof(metadata));
@@ -126,7 +128,6 @@ void m61_free(void *ptr, const char *file, int line) {
     
     meta_ptr->self=NULL;
     backpack_ptr->self=NULL;
-   	free(meta_ptr);
     
     meta_ptr->file=file;
     meta_ptr->line=line;
@@ -155,6 +156,7 @@ void m61_free(void *ptr, const char *file, int line) {
             lastAlloc=NULL;
         }
     }
+   	free(meta_ptr);
 }
 
 void *m61_realloc(void *ptr, size_t sz, const char *file, int line) {
@@ -210,7 +212,7 @@ malloc size:  active %10llu   total %10llu   fail %10llu\n",
 
 void leakTraverse(metadata *ptr){
     if(ptr)
-        printf("LEAK CHECK: %s:%d: allocated object %p with size %llu\n",ptr->file,ptr->line,ptr,ptr->sz);
+        printf("LEAK CHECK: %s:%d: allocated object %p with size %zu\n",ptr->file,ptr->line,ptr,ptr->sz);
     if(ptr->next)
         leakTraverse(ptr->next);
    return; 
