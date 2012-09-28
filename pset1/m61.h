@@ -23,7 +23,7 @@ typedef struct metadata {
     const char *file;
     int line;
     struct metadata *self;
-    unsigned short int previously_freed;
+    double previously_freed;
 }metadata;
 
 typedef struct backpack {

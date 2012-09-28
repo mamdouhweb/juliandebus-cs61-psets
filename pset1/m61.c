@@ -75,9 +75,6 @@ void *m61_malloc(size_t sz, const char *file, int line) {
 		return NULL;
 	}
     
-    if(firstAlloc==NULL){
-       firstAlloc=meta_ptr; 
-    }
     if(lastAlloc){
         lastAlloc->next=meta_ptr;
         meta_ptr->prv=lastAlloc;
@@ -125,7 +122,7 @@ void m61_free(void *ptr, const char *file, int line) {
     if(!metadataIsValid&&!backpackIsValid){
         printf("MEMORY BUG: %s:%i: invalid free of pointer %p, not allocated\n",file,line,ptr);
         metadata *frontAlloc=scanMemoryForAllocation(meta_ptr);
-        char *offset=(char *)meta_ptr-(char *)frontAlloc;
+        uintptr_t offset=(char *)meta_ptr-(char *)frontAlloc;
         if(frontAlloc!=NULL&&offset<sizeof(metadata)+frontAlloc->sz+sizeof(backpack)){
             printf("  %s:%i: %p is %zu bytes inside a %zu byte region allocated here\n",frontAlloc->file,frontAlloc->line,ptr,(char *)meta_ptr-(char *)frontAlloc,frontAlloc->sz);
             return;
@@ -154,7 +151,7 @@ void m61_free(void *ptr, const char *file, int line) {
     if(next==NULL){
         lastAlloc=prv;    
     }
-    if(prv){
+    if(addressIsInHeap(prv)){
         if(prv->next!=meta_ptr){
             printf("MEMORY BUG%s:%i: invalid free of pointer %p",file,line,ptr);
             return;
@@ -168,7 +165,6 @@ void m61_free(void *ptr, const char *file, int line) {
         } 
     }
     else{
-        firstAlloc=next;
         if(next){
             next->prv=prv;
         }
@@ -233,12 +229,12 @@ malloc size:  active %10llu   total %10llu   fail %10llu\n",
 void leakTraverse(metadata *ptr){
     if(ptr)
         printf("LEAK CHECK: %s:%d: allocated object %p with size %zu\n",ptr->file,ptr->line,getPayload(ptr),ptr->sz);
-    if(ptr->next)
-        leakTraverse(ptr->next);
+    if(ptr->prv)
+        leakTraverse(ptr->prv);
    return; 
 }
 
 void m61_printleakreport(void) {
-   if(firstAlloc)
-      leakTraverse(firstAlloc); 
+   if(lastAlloc)
+      leakTraverse(lastAlloc); 
 }
