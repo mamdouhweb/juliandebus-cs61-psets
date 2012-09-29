@@ -40,7 +40,8 @@ size_t maximumSizeValid(){
 
 //Checks whether ptr points to an address that is in the heap
 unsigned short int addressIsInHeap(void *ptr){
-    if(!firstHeap)firstHeap=(void *)&total_size;
+    if(!firstHeap)
+        firstHeap=(void *)&total_size;
     char a;
     if((void *)&a<ptr)
         return 0;
@@ -78,7 +79,7 @@ void *m61_malloc(size_t sz, const char *file, int line) {
 		return NULL;
 	}
 	memset(meta_ptr, 0, sz+sizeof(metadata)+sizeof(backpack));
-    if(!firstHeap)
+    if(firstHeap>meta_ptr||!firstHeap)
         firstHeap=(void *)meta_ptr;
     
     if(lastAlloc){
