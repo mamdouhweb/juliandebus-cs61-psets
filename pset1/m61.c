@@ -5,7 +5,10 @@
 #include <stdio.h>
 #include <inttypes.h>
 
-void updateCounters(hitTracker *tracker, int elements, size_t occurence, const char *file, int line);
+#define THETA 25 
+#define NUMBERCOUNTERS (int)(100/THETA-1)
+
+void updateCounters(hitTracker *tracker, int elements, size_t occurrence, const char *file, int line);
 void trackAllocByHH(size_t sz, const char *file, int line);
 
 unsigned long long active_count; // # active allocations
@@ -250,41 +253,83 @@ void m61_printleakreport(void) {
 }
 
 void printHeavyHitterReport(void){
-    for(int i=0;i<3;++i){
-        printf("Size %10llu %s %d\n",szTracker[i].counter,szTracker[i].file,szTracker[i].line);
-        printf("Frequency %10llu %s %d\n",freqTracker[i].counter,freqTracker[i].file,freqTracker[i].line);
+    sortHitTracker(szTracker,NUMBERCOUNTERS);
+    sortHitTracker(freqTracker,NUMBERCOUNTERS);
+    
+    unsigned long long freqCounterSum=0;
+    unsigned long long szCounterSum=0;
+    for(int i=0;i<NUMBERCOUNTERS;++i){
+        freqCounterSum+=freqTracker[i].counter;
+        szCounterSum+=szTracker[i].counter;   
     }
-    printf("%10llu %10llu",total_count,total_size);
+
+    printf("---------------Heavy Hitter Report-----------------\n");
+    for(int i=0;i<NUMBERCOUNTERS;++i){
+        if(freqTracker[i].counter<0.05*total_count) continue;
+        unsigned long long count=freqTracker[i].counter+(total_count-freqCounterSum)/(NUMBERCOUNTERS+1);
+        printf("HEAVY HITTER: %s:%d: %llu allocations (~%d%%)\n",freqTracker[i].file,freqTracker[i].line,count,(int)(count*100/total_count));
+    }
+    for(int i=0;i<NUMBERCOUNTERS;++i){
+        if(szTracker[i].counter<0.05*total_size) continue;
+        unsigned long long count=szTracker[i].counter+(total_size-szCounterSum)/(NUMBERCOUNTERS+1);
+        printf("HEAVY HITTER: %s:%d: %llu of bytes (~%d%%)\n",szTracker[i].file,szTracker[i].line,count,(int)(count*100/total_size));
+    }
+    printf("---------------------------------------------------\n");
 }
 
 void trackAllocByHH(size_t sz, const char *file, int line){
-    int numberCounters;
-    numberCounters=100/25;
     if(!szTracker){
-        szTracker=malloc(numberCounters*sizeof(hitTracker));
-        freqTracker=malloc(numberCounters*sizeof(hitTracker));
-        memset(szTracker,0,numberCounters*sizeof(hitTracker));
-        memset(szTracker,0,numberCounters*sizeof(hitTracker));
+        szTracker=malloc(NUMBERCOUNTERS*sizeof(hitTracker));
+        freqTracker=malloc(NUMBERCOUNTERS*sizeof(hitTracker));
+        memset(szTracker,0,NUMBERCOUNTERS*sizeof(hitTracker));
+        memset(szTracker,0,NUMBERCOUNTERS*sizeof(hitTracker));
     }
-    updateCounters(szTracker,numberCounters,sz,file,line); 
-    updateCounters(freqTracker,numberCounters,1,file,line); 
+    updateCounters(szTracker,NUMBERCOUNTERS,sz,file,line); 
+    updateCounters(freqTracker,NUMBERCOUNTERS,1,file,line); 
 }
 
-void updateCounters(hitTracker *tracker, int elements, size_t occurence, const char *file, int line){
-    int isFileAndLineTracked;
+void updateCounters(hitTracker *tracker, int elements, size_t occurrence, const char *file, int line){
+    unsigned long long minimumValue;
+    minimumValue=(unsigned long long)-1;
+    unsigned long long subtractValue;
     for(int i=0;i<elements;++i){
+        if(tracker[i].counter<minimumValue)
+            minimumValue=tracker[i].counter;
         if(tracker[i].file==file&&tracker[i].line==line){
-            isFileAndLineTracked=1;
-            tracker[i].counter+=occurence;
+            tracker[i].counter+=occurrence;
             return;
         }
         else if(tracker[i].counter==0){
             tracker[i].file=file;
             tracker[i].line=line;
-            tracker[i].counter+=occurence;
+            tracker[i].counter+=occurrence;
             return;
         }
     }
-    for(int i=0;i<elements;++i)
-        tracker[i].counter-=occurence;
+    if(occurrence>minimumValue)
+        subtractValue=minimumValue;
+    else
+        subtractValue=occurrence;
+    for(int i=0;i<elements;++i){
+        tracker[i].counter-=subtractValue;
+    }
+    if(occurrence>minimumValue)
+       updateCounters(tracker,elements,occurrence-minimumValue,file,line); 
+}
+
+void sortHitTracker(hitTracker *tracker, int elements){
+    int sorted;
+    sorted=0;
+    while(!sorted){
+        sorted=1;
+        for(int i=0;i<elements-1;++i){
+            if(tracker[i].counter<tracker[i+1].counter){ 
+                hitTracker tempTracker;
+                tempTracker=tracker[i];
+                tracker[i]=tracker[i+1];
+                tracker[i+1]=tempTracker;
+                sorted=0;
+            }
+        }
+    }
 }
