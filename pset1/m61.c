@@ -286,7 +286,7 @@ void printHeavyHitterReport(void){
     for(int i=0;i<NUMBERCOUNTERS;++i){
         if(szTracker[i].counter<0.05*total_size) continue;
         unsigned long long count=szTracker[i].counter+(total_size-szCounterSum)/(NUMBERCOUNTERS+1);
-        printf("HEAVY HITTER: %s:%d: %llu of bytes (~%d%%)\n",szTracker[i].file,szTracker[i].line,count,(int)(count*100/total_size));
+        printf("HEAVY HITTER: %s:%d: %llu bytes (~%d%%)\n",szTracker[i].file,szTracker[i].line,count,(int)(count*100/total_size));
     }
     printf("---------------------------------------------------\n");
 }
