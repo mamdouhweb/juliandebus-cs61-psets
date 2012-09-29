@@ -5,21 +5,23 @@
 #include <stdio.h>
 #include <inttypes.h>
 
-//REMOVE LATER!!
-#include <assert.h>
+void updateCounters(hitTracker *tracker, int elements, size_t occurence, const char *file, int line);
+void trackAllocByHH(size_t sz, const char *file, int line);
 
-unsigned long long active_count;	// # active allocations
-unsigned long long active_size;	// # bytes in active allocations
-unsigned long long total_count;	// # total allocations
-unsigned long long total_size;	// # bytes in total allocations
-unsigned long long fail_count;	// # failed allocation attempts
-unsigned long long fail_size;	// # bytes in failed alloc attempts
+unsigned long long active_count; // # active allocations
+unsigned long long active_size;	 // # bytes in active allocations
+unsigned long long total_count;	 // # total allocations
+unsigned long long total_size;	 // # bytes in total allocations
+unsigned long long fail_count;	 // # failed allocation attempts
+unsigned long long fail_size;	 // # bytes in failed alloc attempts
 
-metadata *firstAlloc;
+//points to the object that was allocated last
 metadata *lastAlloc;
 
+//points to the first Address that lives on the heap
 void *firstHeap;
 
+//structs to track frequency and size of heavy hitters
 hitTracker *szTracker;
 hitTracker *freqTracker;
 
@@ -58,18 +60,17 @@ void allocationFailedWithSize(size_t sz){
 }
 
 metadata *scanMemoryForAllocation(void *ptr){
-   if(!addressIsInHeap(ptr))
-       return NULL;
-   metadata *meta_ptr=(metadata *)ptr;
-   if(meta_ptr->self==meta_ptr)
-      return meta_ptr; 
-   else 
-      return scanMemoryForAllocation(--ptr);
+    if(!addressIsInHeap(ptr))
+        return NULL;
+    metadata *meta_ptr=(metadata *)ptr;
+    if(meta_ptr->self==meta_ptr)
+        return meta_ptr; 
+    else 
+        return scanMemoryForAllocation(--ptr);
 }
 
 void *m61_malloc(size_t sz, const char *file, int line) {
-    (void) file, (void) line;	// avoid uninitialized variable warnings
-	//Is this acceptable? Alternative? 
+    (void) file, (void) line;   //avoid uninitialized variable warnings
     if(sz>maximumSizeValid()){
         allocationFailedWithSize(sz);
 	    return NULL;
@@ -80,8 +81,8 @@ void *m61_malloc(size_t sz, const char *file, int line) {
         allocationFailedWithSize(sz);
 		return NULL;
 	}
-	//update HeavyHitterStats
-    trackAllocByHH(sz,file,line);
+	
+    trackAllocByHH(sz,file,line);   //update HeavyHitterStats
     memset(meta_ptr, 0, sz+sizeof(metadata)+sizeof(backpack));
     if((char *)firstHeap>(char *)meta_ptr||!firstHeap)
         firstHeap=(void *)meta_ptr;
@@ -103,15 +104,13 @@ void *m61_malloc(size_t sz, const char *file, int line) {
     meta_ptr->file=file;
     meta_ptr->line=line;
     //save address of metadata struct to backpack
-    //char *start_ptr=(char *)meta_ptr;
     backpack *backpack_ptr=(backpack *)((char *)meta_ptr+sz+sizeof(metadata));
     backpack_ptr->self=backpack_ptr;
-    //printf("%p %p\n",meta_ptr+1,backpack_ptr);
 	return getPayload(meta_ptr); 
 }
 
 void m61_free(void *ptr, const char *file, int line) {
-    (void) file, (void) line;	// avoid uninitialized variable warnings
+    (void) file, (void) line;    //avoid uninitialized variable warnings
     if(NULL==ptr){
         return;   
     }
@@ -126,8 +125,8 @@ void m61_free(void *ptr, const char *file, int line) {
         return;
     }
     unsigned short int metadataIsValid=(meta_ptr==meta_ptr->self);
-    //construct backpack pointer
-    backpack *backpack_ptr=(backpack *)((char *)ptr+meta_ptr->sz);
+    
+    backpack *backpack_ptr=(backpack *)((char *)ptr+meta_ptr->sz);    //construct backpack pointer
     unsigned short int backpackIsValid=(backpack_ptr==backpack_ptr->self);
     
     if(!metadataIsValid&&!backpackIsValid){
@@ -233,8 +232,8 @@ void m61_printstatistics(void) {
 
     printf("malloc count: active %10llu   total %10llu   fail %10llu\n\
 malloc size:  active %10llu   total %10llu   fail %10llu\n",
-	   stats.active_count, stats.total_count, stats.fail_count,
-	   stats.active_size, stats.total_size, stats.fail_size);
+stats.active_count, stats.total_count, stats.fail_count,
+stats.active_size, stats.total_size, stats.fail_size);
 }
 
 void leakTraverse(metadata *ptr){

@@ -8,12 +8,12 @@ void *m61_realloc(void *ptr, size_t sz, const char *file, int line);
 void *m61_calloc(size_t nmemb, size_t sz, const char *file, int line);
 
 struct m61_statistics {
-    unsigned long long active_count;	// # active allocations
-    unsigned long long active_size;	// # bytes in active allocations
-    unsigned long long total_count;	// # total allocations
-    unsigned long long total_size;	// # bytes in total allocations
-    unsigned long long fail_count;	// # failed allocation attempts
-    unsigned long long fail_size;	// # bytes in failed alloc attempts
+    unsigned long long active_count;	//# active allocations
+    unsigned long long active_size;	    //# bytes in active allocations
+    unsigned long long total_count;	    //# total allocations
+    unsigned long long total_size;	    //# bytes in total allocations
+    unsigned long long fail_count;	    //# failed allocation attempts
+    unsigned long long fail_size;	    //# bytes in failed alloc attempts
 };
 
 typedef struct metadata {
@@ -23,7 +23,7 @@ typedef struct metadata {
     const char *file;
     int line;
     struct metadata *self;
-    double previously_freed;
+    double previously_freed; //This ensures a correct alignment
 }metadata;
 
 typedef struct backpack {
