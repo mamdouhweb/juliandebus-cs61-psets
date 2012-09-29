@@ -22,8 +22,8 @@ typedef struct metadata {
     size_t sz;
     const char *file;
     int line;
-    struct metadata *self;
     double previously_freed; //This ensures a correct alignment
+    struct metadata *self;
 }metadata;
 
 typedef struct backpack {
