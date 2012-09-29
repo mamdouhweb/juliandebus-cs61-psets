@@ -20,9 +20,9 @@ typedef struct metadata {
     struct metadata *prv;
     struct metadata *next;
     size_t sz;
+    double previously_freed; //This ensures a correct alignment
     const char *file;
     int line;
-    double previously_freed; //This ensures a correct alignment
     struct metadata *self;
 }metadata;
 
