@@ -8,9 +8,6 @@
 #define THETA 25 
 #define NUMBERCOUNTERS (int)(100/THETA-1)
 
-void updateCounters(hitTracker *tracker, int elements, size_t occurrence, const char *file, int line);
-void trackAllocByHH(size_t sz, const char *file, int line);
-
 unsigned long long active_count; // # active allocations
 unsigned long long active_size;	 // # bytes in active allocations
 unsigned long long total_count;	 // # total allocations
@@ -18,22 +15,31 @@ unsigned long long total_size;	 // # bytes in total allocations
 unsigned long long fail_count;	 // # failed allocation attempts
 unsigned long long fail_size;	 // # bytes in failed alloc attempts
 
-//points to the object that was allocated last
-metadata *lastAlloc;
-
-//points to the first Address that lives on the heap
-void *firstHeap;
-
+metadata *lastAlloc; //points to the object that was allocated last
+void *firstHeap;     //points to the first Address that lives on the heap
 //structs to track frequency and size of heavy hitters
 hitTracker *szTracker;
 hitTracker *freqTracker;
 
+//functions that are not part of the public api
+metadata *getMetadata(void *ptr);
+void *getPayload(metadata *ptr);
+size_t maximumSizeValid();
+unsigned short int addressIsInHeap(void *ptr);
+void allocationFailedWithSize(size_t sz);
+metadata *scanMemoryForAllocation(void *ptr);
+void trackAllocByHH(size_t sz, const char *file, int line);
+void updateCounters(hitTracker *tracker, int elements, size_t occurrence, const char *file, int line);
+void sortHitTracker(hitTracker *tracker, int elements);
+
+//returns the address of the metadata when given a ptr to the ptr passed to the user
 metadata *getMetadata(void *ptr){
     metadata *meta_ptr=(metadata *)ptr;
     --meta_ptr;
     return meta_ptr;
 }
 
+//returns a pointer to the payload (this pointer is handed out to the user)
 void *getPayload(metadata *ptr){
     metadata *meta_ptr=ptr;
     ++meta_ptr;
@@ -62,6 +68,7 @@ void allocationFailedWithSize(size_t sz){
     fail_size+=(unsigned long long)sz;
 }
 
+//recursively scans the memory left of a given pointer and returns a pointer to the adress of the metadata of the found allocation
 metadata *scanMemoryForAllocation(void *ptr){
     if(!addressIsInHeap(ptr))
         return NULL;
@@ -89,7 +96,8 @@ void *m61_malloc(size_t sz, const char *file, int line) {
     memset(meta_ptr, 0, sz+sizeof(metadata)+sizeof(backpack));
     if((char *)firstHeap>(char *)meta_ptr||!firstHeap)
         firstHeap=(void *)meta_ptr;
-    
+   
+    //update links in doubly linked list 
     if(lastAlloc){
         lastAlloc->next=meta_ptr;
         meta_ptr->prv=lastAlloc;
@@ -114,7 +122,7 @@ void *m61_malloc(size_t sz, const char *file, int line) {
 
 void m61_free(void *ptr, const char *file, int line) {
     (void) file, (void) line;    //avoid uninitialized variable warnings
-    if(NULL==ptr){
+    if(ptr==NULL){
         return;   
     }
     if(!addressIsInHeap(ptr)){
@@ -131,7 +139,9 @@ void m61_free(void *ptr, const char *file, int line) {
     
     backpack *backpack_ptr=(backpack *)((char *)ptr+meta_ptr->sz);    //construct backpack pointer
     unsigned short int backpackIsValid=(backpack_ptr==backpack_ptr->self);
-    
+   
+
+    //If neither the metadata nor the backpack is intact, we assume that the pointer was not handed out by m61_malloc() 
     if(!metadataIsValid&&!backpackIsValid){
         printf("MEMORY BUG: %s:%i: invalid free of pointer %p, not allocated\n",file,line,ptr);
         metadata *frontAlloc=scanMemoryForAllocation(meta_ptr);
@@ -142,7 +152,8 @@ void m61_free(void *ptr, const char *file, int line) {
         }
         return;
     }
-    //this is basically an XOR since 1||1 will be caught by the AND  above
+    //this is basically an XOR since 1||1 will be caught by the AND above
+    //If one of metadata or backpack is not intact, we assume that a boundary write occured
     if(!metadataIsValid||!backpackIsValid){
         printf("MEMORY BUG: %s:%i: detected wild write during free of pointer %p\n",file,line,ptr);
         printf("MEMORY BUG: %s:%i: boundary write error!\n",file,line);
@@ -151,14 +162,16 @@ void m61_free(void *ptr, const char *file, int line) {
    	--active_count;
     size_t sz=meta_ptr->sz;
    	active_size-=(unsigned long long)sz;
-    
+   
+    //make metadata and backpack invalid 
     meta_ptr->self=NULL;
     backpack_ptr->self=NULL;
     
     meta_ptr->file=file;
     meta_ptr->line=line;
-    meta_ptr->previously_freed=1;
-    
+    meta_ptr->previously_freed=1;       //this will be checked on each call to m61_free() to catch double frees 
+
+    //Update of the doubly linked list 
     metadata *prv=meta_ptr->prv;
     metadata *next=meta_ptr->next;
     if(next==NULL){
@@ -235,8 +248,8 @@ void m61_printstatistics(void) {
 
     printf("malloc count: active %10llu   total %10llu   fail %10llu\n\
 malloc size:  active %10llu   total %10llu   fail %10llu\n",
-stats.active_count, stats.total_count, stats.fail_count,
-stats.active_size, stats.total_size, stats.fail_size);
+    stats.active_count, stats.total_count, stats.fail_count,
+    stats.active_size, stats.total_size, stats.fail_size);
 }
 
 void leakTraverse(metadata *ptr){
@@ -248,7 +261,8 @@ void leakTraverse(metadata *ptr){
 }
 
 void m61_printleakreport(void) {
-   if(lastAlloc)
+  //if allocated objects exist, start recursive traversal of the list of Allocations 
+  if(lastAlloc)
       leakTraverse(lastAlloc); 
 }
 
@@ -277,6 +291,7 @@ void printHeavyHitterReport(void){
     printf("---------------------------------------------------\n");
 }
 
+//wrapper function which initializes the memory for the hitTracker structs and passes them to updateCounters
 void trackAllocByHH(size_t sz, const char *file, int line){
     if(!szTracker){
         szTracker=malloc(NUMBERCOUNTERS*sizeof(hitTracker));
@@ -288,9 +303,11 @@ void trackAllocByHH(size_t sz, const char *file, int line){
     updateCounters(freqTracker,NUMBERCOUNTERS,1,file,line); 
 }
 
+//modified implementation of the algorithm "FREQUENT" which doesn't rely on differential encoding
+//a pointer to an array of hitTracker structs is passed in along with the occurence which is either 1 (for count) or the size
 void updateCounters(hitTracker *tracker, int elements, size_t occurrence, const char *file, int line){
     unsigned long long minimumValue;
-    minimumValue=(unsigned long long)-1;
+    minimumValue=(unsigned long long)-1;    //We keep track of the minimum count in the array in order to prevent an overflow from happening
     unsigned long long subtractValue;
     for(int i=0;i<elements;++i){
         if(tracker[i].counter<minimumValue)
@@ -306,7 +323,7 @@ void updateCounters(hitTracker *tracker, int elements, size_t occurrence, const 
             return;
         }
     }
-    if(occurrence>minimumValue)
+    if(occurrence>minimumValue)         //occurence>minimumValue would lead to an underflow of (at least) the smallest item in the array
         subtractValue=minimumValue;
     else
         subtractValue=occurrence;
@@ -314,9 +331,11 @@ void updateCounters(hitTracker *tracker, int elements, size_t occurrence, const 
         tracker[i].counter-=subtractValue;
     }
     if(occurrence>minimumValue)
-       updateCounters(tracker,elements,occurrence-minimumValue,file,line); 
+       updateCounters(tracker,elements,occurrence-minimumValue,file,line);  //recursive call to make up for the difference of occurence and subtractValue
 }
 
+
+//sort the Array of Counters by count (bubblesort, but the cost should be negligible due to small n(1/theta) and the fact that it's only called twice
 void sortHitTracker(hitTracker *tracker, int elements){
     int sorted;
     sorted=0;
