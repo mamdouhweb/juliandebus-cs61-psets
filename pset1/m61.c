@@ -19,6 +19,8 @@ metadata rootMetadata;
 metadata *firstAlloc;
 metadata *lastAlloc;
 
+void *firstHeap;
+
 metadata *getMetadata(void *ptr){
     metadata *meta_ptr=(metadata *)ptr;
     --meta_ptr;
@@ -38,10 +40,11 @@ size_t maximumSizeValid(){
 
 //Checks whether ptr points to an address that is in the heap
 unsigned short int addressIsInHeap(void *ptr){
+    if(!firstHeap)firstHeap=(void *)&total_size;
     char a;
     if((void *)&a<ptr)
         return 0;
-    if((void *)&active_size>ptr) //ATTENTION: THIS IS PROBABLY NOT CORRECT
+    if((void *)firstHeap>ptr) 
         return 0;
     return 1;
 }
@@ -74,6 +77,9 @@ void *m61_malloc(size_t sz, const char *file, int line) {
         allocationFailedWithSize(sz);
 		return NULL;
 	}
+	memset(meta_ptr, 0, sz+sizeof(metadata)+sizeof(backpack));
+    if(!firstHeap)
+        firstHeap=(void *)meta_ptr;
     
     if(lastAlloc){
         lastAlloc->next=meta_ptr;
@@ -151,13 +157,13 @@ void m61_free(void *ptr, const char *file, int line) {
     if(next==NULL){
         lastAlloc=prv;    
     }
-    if(addressIsInHeap(prv)){
+    if(prv!=NULL){
         if(prv->next!=meta_ptr){
             printf("MEMORY BUG%s:%i: invalid free of pointer %p",file,line,ptr);
             return;
         }
         prv->next=next;
-        if(next){
+        if(next!=NULL){
             next->prv=prv;
         }
         else{
@@ -165,7 +171,7 @@ void m61_free(void *ptr, const char *file, int line) {
         } 
     }
     else{
-        if(next){
+        if(next!=NULL){
             next->prv=prv;
         }
         else{
