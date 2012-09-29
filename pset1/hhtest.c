@@ -98,4 +98,5 @@ int main(int argc, char **argv) {
 	    ++r;
 	allocators[r](sizes[r]);
     }
+    printHeavyHitterReport();
 }

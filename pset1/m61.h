@@ -30,9 +30,16 @@ typedef struct backpack {
     struct backpack *self; 
 }backpack;
 
+typedef struct hitTracker {
+    unsigned long long counter;
+    const char *file;
+    int line;
+}hitTracker;
+
 void m61_getstatistics(struct m61_statistics *stats);
 void m61_printstatistics(void);
 void m61_printleakreport(void);
+void printHeavyHitterReport(void);
 
 #if !M61_DISABLE
 #define malloc(sz)		m61_malloc((sz), __FILE__, __LINE__)

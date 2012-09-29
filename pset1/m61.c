@@ -15,11 +15,13 @@ unsigned long long total_size;	// # bytes in total allocations
 unsigned long long fail_count;	// # failed allocation attempts
 unsigned long long fail_size;	// # bytes in failed alloc attempts
 
-metadata rootMetadata;
 metadata *firstAlloc;
 metadata *lastAlloc;
 
 void *firstHeap;
+
+hitTracker *szTracker;
+hitTracker *freqTracker;
 
 metadata *getMetadata(void *ptr){
     metadata *meta_ptr=(metadata *)ptr;
@@ -78,8 +80,10 @@ void *m61_malloc(size_t sz, const char *file, int line) {
         allocationFailedWithSize(sz);
 		return NULL;
 	}
-	memset(meta_ptr, 0, sz+sizeof(metadata)+sizeof(backpack));
-    if(firstHeap>meta_ptr||!firstHeap)
+	//update HeavyHitterStats
+    trackAllocByHH(sz,file,line);
+    memset(meta_ptr, 0, sz+sizeof(metadata)+sizeof(backpack));
+    if((char *)firstHeap>(char *)meta_ptr||!firstHeap)
         firstHeap=(void *)meta_ptr;
     
     if(lastAlloc){
@@ -87,7 +91,7 @@ void *m61_malloc(size_t sz, const char *file, int line) {
         meta_ptr->prv=lastAlloc;
     }
     lastAlloc=meta_ptr;
-      
+     
     ++total_count;
 	++active_count;
 	total_size+=sz;
@@ -244,4 +248,44 @@ void leakTraverse(metadata *ptr){
 void m61_printleakreport(void) {
    if(lastAlloc)
       leakTraverse(lastAlloc); 
+}
+
+void printHeavyHitterReport(void){
+    for(int i=0;i<3;++i){
+        printf("Size %10llu %s %d\n",szTracker[i].counter,szTracker[i].file,szTracker[i].line);
+        printf("Frequency %10llu %s %d\n",freqTracker[i].counter,freqTracker[i].file,freqTracker[i].line);
+    }
+    printf("%10llu %10llu",total_count,total_size);
+}
+
+void trackAllocByHH(size_t sz, const char *file, int line){
+    int numberCounters;
+    numberCounters=100/25;
+    if(!szTracker){
+        szTracker=malloc(numberCounters*sizeof(hitTracker));
+        freqTracker=malloc(numberCounters*sizeof(hitTracker));
+        memset(szTracker,0,numberCounters*sizeof(hitTracker));
+        memset(szTracker,0,numberCounters*sizeof(hitTracker));
+    }
+    updateCounters(szTracker,numberCounters,sz,file,line); 
+    updateCounters(freqTracker,numberCounters,1,file,line); 
+}
+
+void updateCounters(hitTracker *tracker, int elements, size_t occurence, const char *file, int line){
+    int isFileAndLineTracked;
+    for(int i=0;i<elements;++i){
+        if(tracker[i].file==file&&tracker[i].line==line){
+            isFileAndLineTracked=1;
+            tracker[i].counter+=occurence;
+            return;
+        }
+        else if(tracker[i].counter==0){
+            tracker[i].file=file;
+            tracker[i].line=line;
+            tracker[i].counter+=occurence;
+            return;
+        }
+    }
+    for(int i=0;i<elements;++i)
+        tracker[i].counter-=occurence;
 }
