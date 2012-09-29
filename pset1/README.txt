@@ -1,7 +1,7 @@
 README for CS 61 Problem Set 1
 ------------------------------
 YOU MUST FILL OUT THIS FILE BEFORE SUBMITTING!
-DELAY
+
 YOUR NAME: Julian Debus
 YOUR HUID: 40879447
 
