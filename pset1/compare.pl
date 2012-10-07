@@ -58,21 +58,30 @@ for (; $a != @actual; ++$a) {
 	next;
     }
 
+    $actual_noabort = $_;
+    $actual_noabort = $1 if ($_ =~ /\A(.*)Aborted \(core dumped\)$/);
+
     my($rex) = $expected[$e]->{r};
     while (my($k, $v) = each %chunks) {
 	$rex =~ s{\\\?\\\?$k\\\?\\\?}{$v}g;
     }
     if (m{\A$rex\z}) {
-	for (my $i = 0; $i < @{$expected[$e]->{match}}; ++$i) {
-	    $chunks{$expected[$e]->{match}->[$i]} = ${$i + 1};
-	}
-	++$e;
+	# OK
+    } elsif ($actual_noabort =~ m{\A$rex\z}) {
+	print "$outname WARNING: output line ", $a + 1, ": Missing newline\n";
     } elsif (!$expected[$e]->{skip}) {
 	print "$outname FAIL: Unexpected output starting on line ", $a + 1, "\n";
 	print "$ARGV[1]:", $expected[$e]->{line}, ": Expected `", $expected[$e]->{t}, "`\n";
 	print "$ARGV[0]:", $a + 1, ": Got `", $_, "`\n";
 	exit(1);
+    } else {
+	next;			# skip assignment
     }
+
+    for (my $i = 0; $i < @{$expected[$e]->{match}}; ++$i) {
+	$chunks{$expected[$e]->{match}->[$i]} = ${$i + 1};
+    }
+    ++$e;
 }
 
 if ($e != @expected) {
