@@ -17,10 +17,9 @@
 // 0  0x40000              0x80000 0xA0000 0x100000             0x140000
 //                                             ^
 //                                             | \___ PROC_SIZE ___/
-//                                      PROC1_START_ADDR
+//                                      PROC_START_ADDR
 
-#define PROC1_START_ADDR	0x100000
-#define PROC_SIZE		0x040000
+#define PROC_SIZE 0x040000	// initial state only
 
 static proc processes[NPROC];	// array of process descriptors
 				// Note that `processes[0]` is never used.
@@ -117,7 +116,7 @@ void process_setup(pid_t pid, int program_number) {
     ++pageinfo[PAGENUMBER(kernel_pagedir)].refcount;
     int r = program_load(&processes[pid], program_number);
     assert(r >= 0);
-    processes[pid].p_registers.reg_esp = PROC1_START_ADDR + PROC_SIZE * pid;
+    processes[pid].p_registers.reg_esp = PROC_START_ADDR + PROC_SIZE * pid;
     page_alloc(processes[pid].p_pagedir,
 	       processes[pid].p_registers.reg_esp - PAGESIZE, pid);
     processes[pid].p_state = P_RUNNABLE;
