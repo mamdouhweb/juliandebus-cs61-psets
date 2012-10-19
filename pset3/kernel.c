@@ -97,8 +97,12 @@ void start(const char *command) {
     else if (command && strcmp(command, "forkexit") == 0)
 	process_setup(1, 5);
     else
-	for (pid_t i = 1; i <= 4; ++i)
-	    process_setup(i, i - 1);
+    for (pid_t i = 1; i <= 4; ++i){
+        process_setup(i, i - 1);
+        virtual_memory_map(kernel_pagedir, 0, 0, (size_t)console, PTE_P|PTE_W);
+        virtual_memory_map(kernel_pagedir,(uintptr_t) console+PAGESIZE,(uintptr_t) console+PAGESIZE, 
+                                (size_t)(PROC_START_ADDR-((uintptr_t)console+PAGESIZE)), PTE_P|PTE_W);
+    }
 
     // Switch to the first process using run()
     run(&processes[1]);
