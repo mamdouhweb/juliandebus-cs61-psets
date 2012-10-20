@@ -184,9 +184,6 @@ void interrupt(struct registers *reg) {
     // If Control-C was typed, exit the virtual machine.
     check_keyboard();
 
-
-    uintptr_t freePhysicalAddress;
-
     // Actually handle the interrupt.
     switch (reg->reg_intno) {
 
@@ -200,16 +197,18 @@ void interrupt(struct registers *reg) {
     case INT_SYS_YIELD:
 	schedule();
 
-    case INT_SYS_PAGE_ALLOC:
-    freePhysicalAddress = freeAddress();
+    case INT_SYS_PAGE_ALLOC: {
+    //find freePhysical Address
+    uintptr_t freePhysicalAddress = freeAddress();
+	//update pageinfo[]
 	pageinfo[PAGENUMBER(freePhysicalAddress)].owner=current->p_pid;
 	pageinfo[PAGENUMBER(freePhysicalAddress)].refcount+=1;
+	//map requested virtual memory address to found physical memory address
 	virtual_memory_map(current->p_pagedir, current->p_registers.reg_eax, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
-	current->p_registers.reg_eax =
-	    page_alloc(current->p_pagedir, current->p_registers.reg_eax,
-		       current->p_pid);
+	current->p_registers.reg_eax = page_alloc(current->p_pagedir, current->p_registers.reg_eax, current->p_pid);
 	run(current);
-
+    }
+    
     case INT_TIMER:
 	++ticks;
 	schedule();
