@@ -31,6 +31,7 @@ static unsigned ticks;		// # timer interrupts so far
 void schedule(void);
 void run(proc *p) __attribute__((noreturn));
 
+uintptr_t freeAddress(void);
 
 // PAGEINFO
 //
@@ -145,6 +146,14 @@ int page_alloc(pageentry_t *pagedir, uintptr_t addr, int8_t owner) {
 }
 
 
+uintptr_t freeAddress(){
+	for (int i = 0; i < NPAGES; ++i) {
+    	if(pageinfo[i].owner==0)
+    		return i*PAGESIZE;
+    }
+    return -1;
+}
+
 // interrupt(reg)
 //    Interrupt handler.
 //
@@ -176,6 +185,8 @@ void interrupt(struct registers *reg) {
     check_keyboard();
 
 
+    uintptr_t freePhysicalAddress;
+
     // Actually handle the interrupt.
     switch (reg->reg_intno) {
 
@@ -190,6 +201,10 @@ void interrupt(struct registers *reg) {
 	schedule();
 
     case INT_SYS_PAGE_ALLOC:
+    freePhysicalAddress = freeAddress();
+	pageinfo[PAGENUMBER(freePhysicalAddress)].owner=current->p_pid;
+	pageinfo[PAGENUMBER(freePhysicalAddress)].refcount+=1;
+	virtual_memory_map(current->p_pagedir, current->p_registers.reg_eax, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
 	current->p_registers.reg_eax =
 	    page_alloc(current->p_pagedir, current->p_registers.reg_eax,
 		       current->p_pid);
@@ -220,7 +235,6 @@ void interrupt(struct registers *reg) {
 
     }
 }
-
 
 // schedule
 //    Pick the next process to run and then run it.
