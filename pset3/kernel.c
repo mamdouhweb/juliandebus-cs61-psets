@@ -207,7 +207,7 @@ void interrupt(struct registers *reg) {
 	}
 	//map requested virtual memory address to found physical memory address
 	// virtual_memory_map(current->p_pagedir, current->p_registers.reg_eax, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
-	virtual_memory_map(kernel_pagedir, current->p_registers.reg_eax, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
+	virtual_memory_map(current->p_pagedir, current->p_registers.reg_eax, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
 	//current->p_registers.reg_eax = page_alloc(current->p_pagedir, current->p_registers.reg_eax, current->p_pid);
 	current->p_registers.reg_eax = page_alloc(current->p_pagedir, freePhysicalAddress, current->p_pid);
 	run(current);
