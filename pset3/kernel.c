@@ -201,11 +201,15 @@ void interrupt(struct registers *reg) {
     //find freePhysical Address
     uintptr_t freePhysicalAddress = freeAddress();
 	//update pageinfo[]
-	pageinfo[PAGENUMBER(freePhysicalAddress)].owner=current->p_pid;
-	pageinfo[PAGENUMBER(freePhysicalAddress)].refcount+=1;
+	if(freePhysicalAddress==-1){
+		current->p_registers.reg_eax=-1;
+		return;
+	}
 	//map requested virtual memory address to found physical memory address
-	virtual_memory_map(current->p_pagedir, current->p_registers.reg_eax, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
-	current->p_registers.reg_eax = page_alloc(current->p_pagedir, current->p_registers.reg_eax, current->p_pid);
+	// virtual_memory_map(current->p_pagedir, current->p_registers.reg_eax, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
+	virtual_memory_map(kernel_pagedir, current->p_registers.reg_eax, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
+	//current->p_registers.reg_eax = page_alloc(current->p_pagedir, current->p_registers.reg_eax, current->p_pid);
+	current->p_registers.reg_eax = page_alloc(current->p_pagedir, freePhysicalAddress, current->p_pid);
 	run(current);
     }
     
