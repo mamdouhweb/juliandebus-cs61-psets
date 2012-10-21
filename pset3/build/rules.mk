@@ -65,7 +65,11 @@ endif
 
 
 # Qemu emulator
-QEMU = qemu-system-i386
+INFERRED_QEMU := $(shell if which qemu-system-i386 2>/dev/null | grep ^/ >/dev/null 2>&1; \
+	then echo qemu-system-i386; \
+	elif grep 16 /etc/fedora-release >/dev/null 2>&1; \
+	then echo qemu; else echo qemu-system-i386; fi)
+QEMU ?= $(INFERRED_QEMU)
 QEMUOPT	= -net none -parallel file:log.txt
 QEMUCONSOLE ?= $(if $(DISPLAY),,1)
 QEMUDISPLAY = $(if $(QEMUCONSOLE),console,graphic)

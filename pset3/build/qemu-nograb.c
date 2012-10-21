@@ -9,6 +9,7 @@
 #include <string.h>
 
 static void *(*next_malloc)(size_t sz);
+static void *(*next_calloc)(size_t nmemb, size_t sz);
 
 typedef struct fake_qemu_put_mouse_event {
     void *qemu_put_mouse_event;
@@ -27,10 +28,12 @@ static fake_qemu_put_mouse_event *test_event;
 static char *test_name;
 
 void *malloc(size_t sz) {
-    if (!next_malloc)
+    if (!next_malloc) {
 	next_malloc = dlsym(RTLD_NEXT, "malloc");
+	next_calloc = dlsym(RTLD_NEXT, "calloc");
+    }
 
-    if (test_mode == 2
+    if (test_mode == 2 && test_event
 	&& test_event->qemu_put_mouse_event_name == test_name
 	&& memcmp(test_name, mouse_string, sizeof(mouse_string)) == 0
 	&& test_event->qemu_put_mouse_event_absolute == 0) {
@@ -49,6 +52,36 @@ void *malloc(size_t sz) {
 	test_event = ptr;
 	test_mode = 1;
     } else
+	test_mode = 0;
+
+    return ptr;
+}
+
+/* 0.15 requires we track calloc too */
+void *calloc(size_t nmemb, size_t sz) {
+    if (!next_calloc) {
+	extern void *__libc_calloc(size_t nmemb, size_t sz);
+	return __libc_calloc(nmemb, sz); /* avoid infinite regress */
+    }
+
+    if (test_mode == 2 && test_event
+	&& test_event->qemu_put_mouse_event_name == test_name
+	&& memcmp(test_name, mouse_string, sizeof(mouse_string)) == 0
+	&& test_event->qemu_put_mouse_event_absolute == 0) {
+	test_event->qemu_put_mouse_event_absolute = 1;
+	test_mode = -1;
+    }
+
+
+    void *ptr = next_calloc(nmemb, sz);
+
+    if (test_mode < 0)
+	/* do nothing */;
+    else if (nmemb == 1 && sz == sizeof(fake_qemu_put_mouse_event)
+	     && test_mode != 2) {
+	test_event = ptr;
+	test_mode = 1;
+    } else if (test_mode != 2)
 	test_mode = 0;
 
     return ptr;
