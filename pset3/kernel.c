@@ -109,6 +109,31 @@ void start(const char *command) {
     run(&processes[1]);
 }
 
+pageentry_t *copy_pagedir(pageentry_t *pagedir){
+	 for (int i = (KERNEL_START_ADDR/PAGESIZE); i < KERNEL_STACK_TOP/PAGESIZE-1; ++i) {
+     	if(pageinfo[i].owner==0&&pageinfo[i+1].owner==0){
+     		pageinfo[i].owner=PO_KERNEL;
+    		pageinfo[i].refcount=1;
+     		pageinfo[i+1].owner=PO_KERNEL;
+    		pageinfo[i+1].refcount=1;
+    		//init a pointer to the new (to be created) page directory
+	  		pageentry_t *processmap=(pageentry_t *)(i<<PAGESHIFT); 
+	  		//set the first page to 0
+    		memset(processmap,0,PAGESIZE);
+    		//set the first entry of the directory to be the address of the page
+    		*processmap=(pageentry_t) ((i+1)<<PAGESHIFT) | PTE_P | PTE_W | PTE_U;
+    		//calculate the offset (in pagetable entries)
+			int offset=PAGENUMBER(PROC_START_ADDR);
+			//copy the contents of the kernel directory page to the 
+    		memcpy((char *)((i+1)<<PAGESHIFT),(char *)pagedir+PAGESIZE,offset);
+    		//0out everything above the offset
+    		memset((char *)processmap+PAGESIZE+offset,0,PAGESIZE-offset);
+    		return processmap;
+    	}
+    }
+    //There are no two adjacent free pages left in kernel memory!
+    assert(0);
+}
 
 // process_setup(pid, program_number)
 //    Load application program `program_number` as process number `pid`.
@@ -117,7 +142,7 @@ void start(const char *command) {
 
 void process_setup(pid_t pid, int program_number) {
     process_init(&processes[pid], 0);
-    processes[pid].p_pagedir = kernel_pagedir;
+    processes[pid].p_pagedir = copy_pagedir(kernel_pagedir);
     ++pageinfo[PAGENUMBER(kernel_pagedir)].refcount;
     int r = program_load(&processes[pid], program_number);
     assert(r >= 0);
@@ -126,7 +151,6 @@ void process_setup(pid_t pid, int program_number) {
 	       processes[pid].p_registers.reg_esp - PAGESIZE, pid);
     processes[pid].p_state = P_RUNNABLE;
 }
-
 
 // page_alloc(pagedir, addr, owner)
 //    Allocates the page with physical address `addr` to the given owner,
