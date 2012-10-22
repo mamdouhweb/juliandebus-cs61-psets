@@ -88,6 +88,7 @@ pageentry_t virtual_memory_lookup(pageentry_t *pagedir, uintptr_t va);
 // page_alloc(pagedir, addr, owner)
 //    Allocates the page with physical address `addr` to the given owner,
 //    and maps it at the same address in the page directory `pagedir`.
+//    The mapping uses permissions `PTE_P | PTE_W | PTE_U` (user-writable).
 //    Fails if physical page `addr` was already allocated. Used by the
 //    program loader.
 int page_alloc(pageentry_t *pagedir, uintptr_t addr, int8_t owner);

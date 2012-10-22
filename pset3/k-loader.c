@@ -37,7 +37,7 @@ struct ramimage {
 static int copyseg(proc *p, const elf_program *ph, const uint8_t *src);
 
 // program_load(p, program_id)
-//    Load the code corresponding to program `programnumber` into the pross
+//    Load the code corresponding to program `programnumber` into the process
 //    `p` and set `p->p_registers.reg_eip` to its entry point. Calls
 //    `page_alloc` to allocate virtual memory for `p` as required. Returns 0
 //    on success and -1 on failure (e.g. out-of-memory).
