@@ -126,6 +126,7 @@ void process_setup(pid_t pid, int program_number) {
 // page_alloc(pagedir, addr, owner)
 //    Allocates the page with physical address `addr` to the given owner,
 //    and maps it at the same address in the page directory `pagedir`.
+//    The mapping uses permissions `PTE_P | PTE_W | PTE_U` (user-writable).
 //    Fails if physical page `addr` was already allocated. Used by the
 //    program loader.
 
@@ -136,6 +137,8 @@ int page_alloc(pageentry_t *pagedir, uintptr_t addr, int8_t owner) {
     else {
 	pageinfo[PAGENUMBER(addr)].refcount = 1;
 	pageinfo[PAGENUMBER(addr)].owner = owner;
+	virtual_memory_map(pagedir, addr, addr, PAGESIZE,
+			   PTE_P | PTE_W | PTE_U);
 	return 0;
     }
 }
