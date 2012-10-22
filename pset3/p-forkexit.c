@@ -1,3 +1,4 @@
+// vim: set tabstop=8: -*- tab-width: 8 -*-
 #include "process.h"
 #include "lib.h"
 #define ALLOC_SLOWDOWN 100

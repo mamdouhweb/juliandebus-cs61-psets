@@ -1,3 +1,4 @@
+// vim: set tabstop=8: -*- tab-width: 8 -*-
 #include "kernel.h"
 #include "lib.h"
 
