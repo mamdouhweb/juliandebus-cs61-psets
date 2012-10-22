@@ -86,5 +86,5 @@ typedef struct {
 		   (val).va_ptr - __va_size(type)))
 #define	va_end(val)	((void)0)
 
-#endif
+#endif /* !__ASSEMBLER__ */
 #endif /* !WEENSYOS_TYPES_H */

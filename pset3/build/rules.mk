@@ -37,6 +37,7 @@ GCCPREFIX := $(shell if i386-jos-elf-objdump -i 2>&1 | grep '^elf32-i386$$' >/de
 endif
 
 # Compiler flags
+# -Os is required for the boot loader to fit within 512 bytes;
 # -ffreestanding means there is no standard library.
 CFLAGS	:= $(CFLAGS) $(DEFS) \
 	-std=gnu99 -Os -ffunction-sections \
