@@ -110,29 +110,33 @@ void start(const char *command) {
 }
 
 pageentry_t *copy_pagedir(pageentry_t *pagedir){
-	 for (int i = (KERNEL_START_ADDR/PAGESIZE); i < KERNEL_STACK_TOP/PAGESIZE-1; ++i) {
-     	if(pageinfo[i].owner==0&&pageinfo[i+1].owner==0){
-     		pageinfo[i].owner=PO_KERNEL;
-    		pageinfo[i].refcount=1;
-     		pageinfo[i+1].owner=PO_KERNEL;
-    		pageinfo[i+1].refcount=1;
-    		//init a pointer to the new (to be created) page directory
-	  		pageentry_t *processmap=(pageentry_t *)(i<<PAGESHIFT); 
-	  		//set the first page to 0
-    		memset(processmap,0,PAGESIZE);
-    		//set the first entry of the directory to be the address of the page
-    		*processmap=(pageentry_t) ((i+1)<<PAGESHIFT) | PTE_P | PTE_W | PTE_U;
-    		//calculate the offset (in pagetable entries)
-			int offset=PAGENUMBER(PROC_START_ADDR);
-			//copy the contents of the kernel directory page to the 
-    		memcpy((char *)((i+1)<<PAGESHIFT),(char *)pagedir+PAGESIZE,offset);
-    		//0out everything above the offset
-    		memset((char *)processmap+PAGESIZE+offset,0,PAGESIZE-offset);
-    		return processmap;
-    	}
-    }
-    //There are no two adjacent free pages left in kernel memory!
-    assert(0);
+	//init a pointer to the new (to be created) page directory
+	pageentry_t *processdir=(pageentry_t *)freeAddress();
+	//page_alloc(pagedir,(uintptr_t)processdir,current->p_pid);
+	 pageinfo[PAGENUMBER(processdir)].owner=current->p_pid;
+     pageinfo[PAGENUMBER(processdir)].refcount=1;
+    //init a pointer to the new (to be created) page
+	pageentry_t *processpage=(pageentry_t *)freeAddress();
+	//page_alloc(pagedir,(uintptr_t)processpage,current->p_pid);
+    pageinfo[PAGENUMBER(processpage)].owner=current->p_pid;
+    pageinfo[PAGENUMBER(processpage)].refcount=1;
+		
+	//set the first page to 0
+	memset(processdir,0,PAGESIZE);
+	//set the first entry of the directory to be the address of the page
+	processdir[0]=(pageentry_t) processpage | PTE_P | PTE_W | PTE_U;
+	//calculate the offset (in bytes)
+	int offset=PAGENUMBER(PROC_START_ADDR)*sizeof(pageentry_t); //1024
+	//log_printf("%d indices %d index of proc_start %d size in bytes from 0 to proc_start \n",PAGESIZE/sizeof(pageentry_t),PAGENUMBER(PROC_START_ADDR),PAGENUMBER(PROC_START_ADDR)*sizeof(pageentry_t));
+	//construct a pointer from the passed in page directory to its pagetable page
+	//(strip away the permission bits)
+	pageentry_t *pdpagetable=(pageentry_t *)(pagedir[0]&(~0<<3));
+	//copy the contents of the kernel directory page to the newly created one
+	memcpy(processpage,pdpagetable,offset);
+	//0out everything above the offset
+	memset(processpage+PAGENUMBER(PROC_START_ADDR),0,PAGESIZE-offset);
+	log_printf("%p %p %p %p\n",*pagedir,pdpagetable,*processdir,processpage);
+	return pagedir;
 }
 
 // process_setup(pid, program_number)
@@ -142,7 +146,9 @@ pageentry_t *copy_pagedir(pageentry_t *pagedir){
 
 void process_setup(pid_t pid, int program_number) {
     process_init(&processes[pid], 0);
-    processes[pid].p_pagedir = copy_pagedir(kernel_pagedir);
+    current->p_pid=pid;
+    //log_printf("%d",current->p_pid);
+    processes[pid].p_pagedir = kernel_pagedir;//copy_pagedir(kernel_pagedir);
     ++pageinfo[PAGENUMBER(kernel_pagedir)].refcount;
     int r = program_load(&processes[pid], program_number);
     assert(r >= 0);
@@ -172,6 +178,16 @@ int page_alloc(pageentry_t *pagedir, uintptr_t addr, int8_t owner) {
     }
 }
 
+int my_page_alloc(pageentry_t *pagedir, uintptr_t addr, int8_t owner) {
+    if ((addr & 0xFFF) != 0 || addr >= MEMSIZE_PHYSICAL
+	|| pageinfo[PAGENUMBER(addr)].refcount != 0)
+	return -1;
+    else {
+	pageinfo[PAGENUMBER(addr)].refcount = 1;
+	pageinfo[PAGENUMBER(addr)].owner = owner;
+	return 0;
+    }
+}
 
 uintptr_t freeAddress(){
 	for (int i = 0; i < NPAGES; ++i) {
@@ -225,7 +241,7 @@ void interrupt(struct registers *reg) {
 	schedule();
 
     case INT_SYS_PAGE_ALLOC: {
-    //find freePhysical Address
+    //find free physical Address
     uintptr_t freePhysicalAddress = freeAddress();
 	//update pageinfo[]
 	if(freePhysicalAddress==-1){
@@ -236,7 +252,7 @@ void interrupt(struct registers *reg) {
 	// virtual_memory_map(current->p_pagedir, current->p_registers.reg_eax, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
 	virtual_memory_map(current->p_pagedir, current->p_registers.reg_eax, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
 	//current->p_registers.reg_eax = page_alloc(current->p_pagedir, current->p_registers.reg_eax, current->p_pid);
-	current->p_registers.reg_eax = page_alloc(current->p_pagedir, freePhysicalAddress, current->p_pid);
+	current->p_registers.reg_eax = my_page_alloc(current->p_pagedir, freePhysicalAddress, current->p_pid);
 	run(current);
     }
     
