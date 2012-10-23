@@ -29,13 +29,12 @@
 
 // Page fault error flags
 // These bits are stored in registers_t::reg_err after a page fault trap.
-#define PFERR_USER	0x4		// Fault happened in an application
-					//   (user mode) (rather than kernel)
-#define PFERR_WRITE	0x2		// Fault happened on a write
 #define PFERR_PRESENT	0x1		// Fault happened due to a protection
 					//   violation (rather than due to a
-					//   mising page)
-
+					//   missing page)
+#define PFERR_WRITE	0x2		// Fault happened on a write
+#define PFERR_USER	0x4		// Fault happened in an application
+					//   (user mode) (rather than kernel)
 
 // Interrupt numbers
 #define INT_DIVIDE      0x0         // Divide error
