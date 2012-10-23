@@ -74,6 +74,9 @@ void memshow_virtual(pageentry_t *pagedir, const char *name);
 void memshow_virtual_animate(void);
 
 
+int page_alloc(pageentry_t *pagedir, uintptr_t addr, int8_t owner);
+int my_page_alloc(pageentry_t *pagedir, uintptr_t addr, int8_t owner);
+
 // start(command)
 //    Initialize the hardware and processes and start running. The `command`
 //    string is an optional string passed from the boot loader.
@@ -112,31 +115,42 @@ void start(const char *command) {
 pageentry_t *copy_pagedir(pageentry_t *pagedir){
 	//init a pointer to the new (to be created) page directory
 	pageentry_t *processdir=(pageentry_t *)freeAddress();
-	//page_alloc(pagedir,(uintptr_t)processdir,current->p_pid);
-	 pageinfo[PAGENUMBER(processdir)].owner=current->p_pid;
-     pageinfo[PAGENUMBER(processdir)].refcount=1;
+	my_page_alloc(pagedir,(uintptr_t)processdir,current->p_pid);
+	//pageinfo[PAGENUMBER(processdir)].owner=current->p_pid;
+    //++pageinfo[PAGENUMBER(processdir)].refcount;
     //init a pointer to the new (to be created) page
 	pageentry_t *processpage=(pageentry_t *)freeAddress();
-	//page_alloc(pagedir,(uintptr_t)processpage,current->p_pid);
-    pageinfo[PAGENUMBER(processpage)].owner=current->p_pid;
-    pageinfo[PAGENUMBER(processpage)].refcount=1;
-		
+	my_page_alloc(pagedir,(uintptr_t)processpage,current->p_pid);
+    //pageinfo[PAGENUMBER(processpage)].owner=current->p_pid;
+    //++pageinfo[PAGENUMBER(processpage)].refcount;
+	
+	//memcpy(processdir,pagedir,PAGESIZE);
+
 	//set the first page to 0
 	memset(processdir,0,PAGESIZE);
-	//set the first entry of the directory to be the address of the page
+	//processdir[0]=pagedir[0];
+    //set the first entry of the directory to be the address of the new page
 	processdir[0]=(pageentry_t) processpage | PTE_P | PTE_W | PTE_U;
+
+	for (int i=0;i<PAGENUMBER(PROC_START_ADDR);i+=1){
+		uintptr_t pa=(uintptr_t)PTE_ADDR(virtual_memory_lookup(pagedir,i<<PAGESHIFT));
+		//log_printf("%d\n",i);
+		//processpage[i]=(pageentry_t) pa | PTE_P | PTE_W;
+        virtual_memory_map(processdir,i<<PAGESHIFT,pa,PAGESIZE,PTE_P|PTE_W);
+	}
+
 	//calculate the offset (in bytes)
-	int offset=PAGENUMBER(PROC_START_ADDR)*sizeof(pageentry_t); //1024
-	//log_printf("%d indices %d index of proc_start %d size in bytes from 0 to proc_start \n",PAGESIZE/sizeof(pageentry_t),PAGENUMBER(PROC_START_ADDR),PAGENUMBER(PROC_START_ADDR)*sizeof(pageentry_t));
-	//construct a pointer from the passed in page directory to its pagetable page
-	//(strip away the permission bits)
-	pageentry_t *pdpagetable=(pageentry_t *)(pagedir[0]&(~0<<3));
-	//copy the contents of the kernel directory page to the newly created one
-	memcpy(processpage,pdpagetable,offset);
-	//0out everything above the offset
-	memset(processpage+PAGENUMBER(PROC_START_ADDR),0,PAGESIZE-offset);
-	log_printf("%p %p %p %p\n",*pagedir,pdpagetable,*processdir,processpage);
-	return pagedir;
+//	int offset=PAGENUMBER(PROC_START_ADDR)*sizeof(pageentry_t); //1024
+	// //construct a pointer from the passed in page directory to its pagetable page
+	// //(strip away the permission bits)
+//	pageentry_t *pdpagetable=(pageentry_t *)(pagedir[0]&(~0<<3));
+	// //copy the contents of the kernel directory page to the newly created one
+	
+//	memcpy(processpage, pdpagetable,offset);
+	// //0out everything above the offset
+//	memset((char *)processpage+offset,0,PAGESIZE-offset);
+	
+    return processdir;
 }
 
 // process_setup(pid, program_number)
@@ -148,8 +162,8 @@ void process_setup(pid_t pid, int program_number) {
     process_init(&processes[pid], 0);
     current->p_pid=pid;
     //log_printf("%d",current->p_pid);
-    processes[pid].p_pagedir = kernel_pagedir;//copy_pagedir(kernel_pagedir);
-    ++pageinfo[PAGENUMBER(kernel_pagedir)].refcount;
+    processes[pid].p_pagedir = copy_pagedir(kernel_pagedir);
+    //++pageinfo[PAGENUMBER(kernel_pagedir)].refcount;
     int r = program_load(&processes[pid], program_number);
     assert(r >= 0);
     processes[pid].p_registers.reg_esp = PROC_START_ADDR + PROC_SIZE * pid;
@@ -381,8 +395,8 @@ void virtual_memory_check(void) {
 	    expected_owner = pid;
 	    expected_refcount = 1;
 	}
-
-	// Check page directory itself
+    
+    // Check page directory itself
 	assert(pageinfo[PAGENUMBER(pagedir)].owner == expected_owner);
 	assert(pageinfo[PAGENUMBER(pagedir)].refcount == expected_refcount);
 
@@ -390,7 +404,7 @@ void virtual_memory_check(void) {
 	for (int pn = 0; pn < PAGETABLE_NENTRIES; ++pn)
 	    if (pagedir[pn] & PTE_P) {
 		pageentry_t pte = pagedir[pn];
-		assert(pageinfo[PAGENUMBER(pte)].owner == expected_owner);
+        assert(pageinfo[PAGENUMBER(pte)].owner == expected_owner);
 		assert(pageinfo[PAGENUMBER(pte)].refcount == 1);
 	    }
     }
