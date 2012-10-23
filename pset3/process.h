@@ -41,9 +41,8 @@ static inline int sys_page_alloc(void *addr) {
 }
 
 // sys_fork()
-//    Allocate a page of memory at address `addr`. `Addr` must be page-aligned
-//    (i.e., a multiple of PAGESIZE == 4096). Returns 0 on success and -1
-//    on failure.
+//    Fork the current process. On success, return the child's process ID to
+//    the parent, and return 0 to the child. On failure, return -1.
 static inline pid_t sys_fork(void) {
     return (pid_t) syscall_0(INT_SYS_FORK);
 }
