@@ -102,10 +102,10 @@ void start(const char *command) {
 	process_setup(1, 5);
     else
     for (pid_t i = 1; i <= 4; ++i){
-        process_setup(i, i - 1);
         virtual_memory_map(kernel_pagedir, 0, 0, (size_t)console, PTE_P|PTE_W);
         virtual_memory_map(kernel_pagedir,(uintptr_t) console+PAGESIZE,(uintptr_t) console+PAGESIZE, 
                                 (size_t)(PROC_START_ADDR-((uintptr_t)console+PAGESIZE)), PTE_P|PTE_W);
+        process_setup(i, i - 1);
     }
 
     // Switch to the first process using run()
@@ -116,40 +116,30 @@ pageentry_t *copy_pagedir(pageentry_t *pagedir){
 	//init a pointer to the new (to be created) page directory
 	pageentry_t *processdir=(pageentry_t *)freeAddress();
 	my_page_alloc(pagedir,(uintptr_t)processdir,current->p_pid);
-	//pageinfo[PAGENUMBER(processdir)].owner=current->p_pid;
-    //++pageinfo[PAGENUMBER(processdir)].refcount;
+    
     //init a pointer to the new (to be created) page
 	pageentry_t *processpage=(pageentry_t *)freeAddress();
 	my_page_alloc(pagedir,(uintptr_t)processpage,current->p_pid);
-    //pageinfo[PAGENUMBER(processpage)].owner=current->p_pid;
-    //++pageinfo[PAGENUMBER(processpage)].refcount;
 	
-	//memcpy(processdir,pagedir,PAGESIZE);
-
 	//set the first page to 0
 	memset(processdir,0,PAGESIZE);
-	//processdir[0]=pagedir[0];
+
     //set the first entry of the directory to be the address of the new page
 	processdir[0]=(pageentry_t) processpage | PTE_P | PTE_W | PTE_U;
 
-	for (int i=0;i<PAGENUMBER(PROC_START_ADDR);i+=1){
-		uintptr_t pa=(uintptr_t)PTE_ADDR(virtual_memory_lookup(pagedir,i<<PAGESHIFT));
-		//log_printf("%d\n",i);
-		//processpage[i]=(pageentry_t) pa | PTE_P | PTE_W;
-        virtual_memory_map(processdir,i<<PAGESHIFT,pa,PAGESIZE,PTE_P|PTE_W);
-	}
+	//calculate the offset (in bytes) inside pagetable
+    int offset=PAGENUMBER(PROC_START_ADDR)*sizeof(pageentry_t); //1024
+	
+    //construct a pointer from the passed in page directory to its pagetable page
+	//(strip away the permission bits)
+    pageentry_t *pdpagetable=(pageentry_t *)PTE_ADDR(pagedir[0]);
 
-	//calculate the offset (in bytes)
-//	int offset=PAGENUMBER(PROC_START_ADDR)*sizeof(pageentry_t); //1024
-	// //construct a pointer from the passed in page directory to its pagetable page
-	// //(strip away the permission bits)
-//	pageentry_t *pdpagetable=(pageentry_t *)(pagedir[0]&(~0<<3));
-	// //copy the contents of the kernel directory page to the newly created one
-	
-//	memcpy(processpage, pdpagetable,offset);
-	// //0out everything above the offset
-//	memset((char *)processpage+offset,0,PAGESIZE-offset);
-	
+	//copy the contents of the kernel directory page to the newly created one
+	memcpy(processpage, pdpagetable,offset);
+
+	//0out everything above the offset
+	memset((char *)processpage+offset,0,PAGESIZE-offset);
+
     return processdir;
 }
 
@@ -404,6 +394,7 @@ void virtual_memory_check(void) {
 	for (int pn = 0; pn < PAGETABLE_NENTRIES; ++pn)
 	    if (pagedir[pn] & PTE_P) {
 		pageentry_t pte = pagedir[pn];
+        log_printf("%p\n",pte);
         assert(pageinfo[PAGENUMBER(pte)].owner == expected_owner);
 		assert(pageinfo[PAGENUMBER(pte)].refcount == 1);
 	    }
