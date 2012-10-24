@@ -151,14 +151,18 @@ pageentry_t *copy_pagedir(pageentry_t *pagedir){
 void process_setup(pid_t pid, int program_number) {
     process_init(&processes[pid], 0);
     current->p_pid=pid;
-    //log_printf("%d",current->p_pid);
     processes[pid].p_pagedir = copy_pagedir(kernel_pagedir);
-    //++pageinfo[PAGENUMBER(kernel_pagedir)].refcount;
+    
     int r = program_load(&processes[pid], program_number);
     assert(r >= 0);
-    processes[pid].p_registers.reg_esp = PROC_START_ADDR + PROC_SIZE * pid;
-    page_alloc(processes[pid].p_pagedir,
-	       processes[pid].p_registers.reg_esp - PAGESIZE, pid);
+    processes[pid].p_registers.reg_esp = MEMSIZE_VIRTUAL;// PROC_START_ADDR + PROC_SIZE * pid;
+    uintptr_t procStack=freeAddress();
+    my_page_alloc(processes[pid].p_pagedir,
+	       procStack, pid);
+    virtual_memory_map(processes[pid].p_pagedir,processes[pid].p_registers.reg_esp - PAGESIZE,procStack,PAGESIZE,PTE_P | PTE_W | PTE_U);
+//    my_page_alloc(processes[pid].p_pagedir,
+//	       processes[pid].p_registers.reg_esp - PAGESIZE, pid);
+    
     processes[pid].p_state = P_RUNNABLE;
 }
 
@@ -249,8 +253,9 @@ void interrupt(struct registers *reg) {
     uintptr_t freePhysicalAddress = freeAddress();
 	//update pageinfo[]
 	if(freePhysicalAddress==-1){
-		current->p_registers.reg_eax=-1;
-		return;
+		log_printf("HIER!!");
+        current->p_registers.reg_eax=-1;
+        run(current);
 	}
 	//map requested virtual memory address to found physical memory address
 	// virtual_memory_map(current->p_pagedir, current->p_registers.reg_eax, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
