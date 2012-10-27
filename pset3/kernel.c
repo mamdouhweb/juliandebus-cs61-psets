@@ -75,7 +75,7 @@ void memshow_virtual_animate(void);
 
 
 int page_alloc(pageentry_t *pagedir, uintptr_t addr, int8_t owner);
-int my_page_alloc(pageentry_t *pagedir, uintptr_t addr, int8_t owner);
+int my_page_alloc(uintptr_t addr, int8_t owner);
 
 // start(command)
 //    Initialize the hardware and processes and start running. The `command`
@@ -95,6 +95,10 @@ void start(const char *command) {
 	processes[i].p_pid = i;
 	processes[i].p_state = P_FREE;
     }
+    
+    virtual_memory_map(kernel_pagedir, 0, 0, (size_t)console, PTE_P|PTE_W);
+    virtual_memory_map(kernel_pagedir,(uintptr_t) console+PAGESIZE,(uintptr_t) console+PAGESIZE, 
+                            (size_t)(PROC_START_ADDR-((uintptr_t)console+PAGESIZE)), PTE_P|PTE_W);
 
     if (command && strcmp(command, "fork") == 0)
 	process_setup(1, 4);
@@ -102,9 +106,6 @@ void start(const char *command) {
 	process_setup(1, 5);
     else
     for (pid_t i = 1; i <= 4; ++i){
-        virtual_memory_map(kernel_pagedir, 0, 0, (size_t)console, PTE_P|PTE_W);
-        virtual_memory_map(kernel_pagedir,(uintptr_t) console+PAGESIZE,(uintptr_t) console+PAGESIZE, 
-                                (size_t)(PROC_START_ADDR-((uintptr_t)console+PAGESIZE)), PTE_P|PTE_W);
         process_setup(i, i - 1);
     }
 
@@ -112,14 +113,14 @@ void start(const char *command) {
     run(&processes[1]);
 }
 
-pageentry_t *copy_pagedir(pageentry_t *pagedir){
+pageentry_t *copy_pagedir(pageentry_t *pagedir, pid_t owner){
 	//init a pointer to the new (to be created) page directory
 	pageentry_t *processdir=(pageentry_t *)freeAddress();
-	my_page_alloc(pagedir,(uintptr_t)processdir,current->p_pid);
+	my_page_alloc((uintptr_t)processdir,owner);
     
     //init a pointer to the new (to be created) page
 	pageentry_t *processpage=(pageentry_t *)freeAddress();
-	my_page_alloc(pagedir,(uintptr_t)processpage,current->p_pid);
+	my_page_alloc((uintptr_t)processpage,owner);
 	
 	//set the first page to 0
 	memset(processdir,0,PAGESIZE);
@@ -151,17 +152,14 @@ pageentry_t *copy_pagedir(pageentry_t *pagedir){
 void process_setup(pid_t pid, int program_number) {
     process_init(&processes[pid], 0);
     current->p_pid=pid;
-    processes[pid].p_pagedir = copy_pagedir(kernel_pagedir);
+    processes[pid].p_pagedir = copy_pagedir(kernel_pagedir, current->p_pid);
     
     int r = program_load(&processes[pid], program_number);
     assert(r >= 0);
     processes[pid].p_registers.reg_esp = MEMSIZE_VIRTUAL;// PROC_START_ADDR + PROC_SIZE * pid;
     uintptr_t procStack=freeAddress();
-    my_page_alloc(processes[pid].p_pagedir,
-	       procStack, pid);
+    my_page_alloc(procStack, pid);
     virtual_memory_map(processes[pid].p_pagedir,processes[pid].p_registers.reg_esp - PAGESIZE,procStack,PAGESIZE,PTE_P | PTE_W | PTE_U);
-//    my_page_alloc(processes[pid].p_pagedir,
-//	       processes[pid].p_registers.reg_esp - PAGESIZE, pid);
     
     processes[pid].p_state = P_RUNNABLE;
 }
@@ -186,7 +184,15 @@ int page_alloc(pageentry_t *pagedir, uintptr_t addr, int8_t owner) {
     }
 }
 
-int my_page_alloc(pageentry_t *pagedir, uintptr_t addr, int8_t owner) {
+uintptr_t m_alloc(int8_t owner){
+    uintptr_t freePhysicalAddress=freeAddress();
+    if(freePhysicalAddress==-1)
+        return -1;
+    my_page_alloc(freePhysicalAddress,owner);
+    return freePhysicalAddress;
+}
+
+int my_page_alloc(uintptr_t addr, int8_t owner) {
     if ((addr & 0xFFF) != 0 || addr >= MEMSIZE_PHYSICAL
 	|| pageinfo[PAGENUMBER(addr)].refcount != 0)
 	return -1;
@@ -253,7 +259,6 @@ void interrupt(struct registers *reg) {
     uintptr_t freePhysicalAddress = freeAddress();
 	//update pageinfo[]
 	if(freePhysicalAddress==-1){
-		log_printf("HIER!!");
         current->p_registers.reg_eax=-1;
         run(current);
 	}
@@ -261,7 +266,7 @@ void interrupt(struct registers *reg) {
 	// virtual_memory_map(current->p_pagedir, current->p_registers.reg_eax, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
 	virtual_memory_map(current->p_pagedir, current->p_registers.reg_eax, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
 	//current->p_registers.reg_eax = page_alloc(current->p_pagedir, current->p_registers.reg_eax, current->p_pid);
-	current->p_registers.reg_eax = my_page_alloc(current->p_pagedir, freePhysicalAddress, current->p_pid);
+	current->p_registers.reg_eax = my_page_alloc(freePhysicalAddress, current->p_pid);
 	run(current);
     }
     
@@ -283,6 +288,47 @@ void interrupt(struct registers *reg) {
 		       current->p_pid, addr, operation, problem, reg->reg_eip);
 	current->p_state = P_BROKEN;
 	schedule();
+    }
+    
+    case INT_SYS_FORK:{
+        log_printf("PID: %d EAX: %d EIP: %p \n",current->p_pid, current->p_registers.reg_eax, current->p_registers.reg_eip);
+        int slot=-1;
+        for (int i=1;i<NPROC;++i){
+            if(processes[i].p_state==P_FREE){
+                slot=i;
+                log_printf("Found free slot for process: %d\n",slot);
+                break;
+            }
+        }
+        if(slot==-1){
+            current->p_registers.reg_eax=-1;
+            run(current);
+            return;
+        }
+        else {
+            proc *father=current;
+            proc *child=&processes[slot];
+            child->p_pid=slot;
+            child->p_registers=father->p_registers;
+            child->p_registers.reg_eax=0;
+            child->p_state=P_RUNNABLE;
+            pageentry_t *forkdir=copy_pagedir(father->p_pagedir,child->p_pid);
+
+            for (int i=PAGENUMBER(PROC_START_ADDR);i<PAGENUMBER(MEMSIZE_VIRTUAL);++i){
+                uintptr_t va=i<<PAGESHIFT;
+                uintptr_t pa=virtual_memory_lookup(father->p_pagedir,va);
+                int pageIsUserWritable=(pa&7)==7;
+                if(!pageIsUserWritable)
+                    continue;
+                uintptr_t freePhysicalAddress=m_alloc(slot); 
+                memcpy((char *)freePhysicalAddress,(char *)pa,PAGESIZE);
+                virtual_memory_map(forkdir, va, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
+            }
+            child->p_pagedir=forkdir;
+            father->p_registers.reg_eax=child->p_pid;
+            log_printf("About to run process: %d\n",father->p_pid);
+            run(father);
+        }
     }
 
     default:
@@ -390,7 +436,10 @@ void virtual_memory_check(void) {
 	    expected_owner = pid;
 	    expected_refcount = 1;
 	}
-    
+   
+    if(pageinfo[PAGENUMBER(pagedir)].owner != expected_owner) 
+        log_printf("%d %d\n",pageinfo[PAGENUMBER(pagedir)].owner,expected_owner);
+
     // Check page directory itself
 	assert(pageinfo[PAGENUMBER(pagedir)].owner == expected_owner);
 	assert(pageinfo[PAGENUMBER(pagedir)].refcount == expected_refcount);
@@ -399,7 +448,6 @@ void virtual_memory_check(void) {
 	for (int pn = 0; pn < PAGETABLE_NENTRIES; ++pn)
 	    if (pagedir[pn] & PTE_P) {
 		pageentry_t pte = pagedir[pn];
-        log_printf("%p\n",pte);
         assert(pageinfo[PAGENUMBER(pte)].owner == expected_owner);
 		assert(pageinfo[PAGENUMBER(pte)].refcount == 1);
 	    }
