@@ -230,7 +230,7 @@ void interrupt(struct registers *reg) {
     lcr3(kernel_pagedir);
 
     // It can be useful to log events using `log_printf` (see host's `log.txt`).
-    /*log_printf("proc %d: interrupt %d\n", current->p_pid, reg->reg_intno);*/
+    //log_printf("proc %d: interrupt %d\n", current->p_pid, reg->reg_intno);
 
     // Show the current cursor location and memory state.
     console_show_cursor(cursorpos);
@@ -291,7 +291,7 @@ void interrupt(struct registers *reg) {
     }
     
     case INT_SYS_FORK:{
-        log_printf("PID: %d EAX: %d EIP: %p \n",current->p_pid, current->p_registers.reg_eax, current->p_registers.reg_eip);
+        log_printf("Entering PID: %d EAX: %d EIP: %p \n",current->p_pid, current->p_registers.reg_eax, current->p_registers.reg_eip);
         int slot=-1;
         for (int i=1;i<NPROC;++i){
             if(processes[i].p_state==P_FREE){
@@ -320,13 +320,15 @@ void interrupt(struct registers *reg) {
                 int pageIsUserWritable=(pa&7)==7;
                 if(!pageIsUserWritable)
                     continue;
-                uintptr_t freePhysicalAddress=m_alloc(slot); 
-                memcpy((char *)freePhysicalAddress,(char *)pa,PAGESIZE);
+                uintptr_t freePhysicalAddress=m_alloc(child->p_pid); 
+                memcpy((char *)freePhysicalAddress, (char *)PTE_ADDR(pa), PAGESIZE);
                 virtual_memory_map(forkdir, va, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
+                log_printf("OVA %p OPA %p \tNVA %p NPA %p\n",va,pa,va,virtual_memory_lookup(forkdir,va));
             }
             child->p_pagedir=forkdir;
             father->p_registers.reg_eax=child->p_pid;
-            log_printf("About to run process: %d\n",father->p_pid);
+            log_printf("About to return to process: %d\n",father->p_pid);
+            log_printf("Exiting PID: %d EAX: %d EIP: %p \n\n",current->p_pid, current->p_registers.reg_eax, current->p_registers.reg_eip);
             run(father);
         }
     }
