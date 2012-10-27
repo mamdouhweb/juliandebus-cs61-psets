@@ -291,12 +291,10 @@ void interrupt(struct registers *reg) {
     }
     
     case INT_SYS_FORK:{
-        log_printf("Entering PID: %d EAX: %d EIP: %p \n",current->p_pid, current->p_registers.reg_eax, current->p_registers.reg_eip);
         int slot=-1;
         for (int i=1;i<NPROC;++i){
             if(processes[i].p_state==P_FREE){
                 slot=i;
-                log_printf("Found free slot for process: %d\n",slot);
                 break;
             }
         }
@@ -323,12 +321,9 @@ void interrupt(struct registers *reg) {
                 uintptr_t freePhysicalAddress=m_alloc(child->p_pid); 
                 memcpy((char *)freePhysicalAddress, (char *)PTE_ADDR(pa), PAGESIZE);
                 virtual_memory_map(forkdir, va, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
-                log_printf("OVA %p OPA %p \tNVA %p NPA %p\n",va,pa,va,virtual_memory_lookup(forkdir,va));
             }
             child->p_pagedir=forkdir;
             father->p_registers.reg_eax=child->p_pid;
-            log_printf("About to return to process: %d\n",father->p_pid);
-            log_printf("Exiting PID: %d EAX: %d EIP: %p \n\n",current->p_pid, current->p_registers.reg_eax, current->p_registers.reg_eip);
             run(father);
         }
     }
