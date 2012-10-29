@@ -314,7 +314,7 @@ void interrupt(struct registers *reg) {
             child->p_registers.reg_eax=0;
             child->p_state=P_RUNNABLE;
             // copy the father's pagedirectory
-            pageentry_t *forkdir=copy_pagedir(father->p_pagedir,child->p_pid);
+            pageentry_t *forkdir=copy_pagedir(father->p_pagedir, child->p_pid);
             // make a physical copy every user writable page and map the copy in the child's pagedirectory
             for (int i=PAGENUMBER(PROC_START_ADDR);i<PAGENUMBER(MEMSIZE_VIRTUAL);++i){
                 uintptr_t va=i<<PAGESHIFT;
@@ -322,14 +322,14 @@ void interrupt(struct registers *reg) {
                 int pageIsUserWritable=(pa&7)==7;
                 int pageIsUserReadable=(pa&(PTE_P|PTE_U))==(PTE_P|PTE_U);
                 if(pageIsUserWritable){
-                    log_printf("Writable! %d %p %d %d %p\n",child->p_pid, va ,pageIsUserWritable, pageIsUserReadable, pa);
+                    log_printf("Page at address %p is writable! --  Process %d Dad: %d\n", va, child->p_pid, father->p_pid);
                     uintptr_t freePhysicalAddress=m_alloc(child->p_pid); 
                     memcpy((char *)freePhysicalAddress, (char *)PTE_ADDR(pa), PAGESIZE);
                     virtual_memory_map(forkdir, va, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
                 }
                 else if(pageIsUserReadable) {
-                    log_printf("Readable! %d %p %d %d %p\n",child->p_pid, va ,pageIsUserWritable, pageIsUserReadable, pa);
-                    virtual_memory_map(forkdir, va, PTE_ADDR(pa), PAGESIZE, PTE_P|PTE_W|PTE_U);
+                    log_printf("Page at address %p is readable! --  Process %d Dad: %d\n", va, child->p_pid, father->p_pid);
+                    virtual_memory_map(forkdir, va, PTE_ADDR(pa), PAGESIZE, PTE_P|PTE_U);
                     ++pageinfo[PAGENUMBER(PTE_ADDR(pa))].refcount;
                 }
             }

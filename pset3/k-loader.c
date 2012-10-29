@@ -87,7 +87,7 @@ static int copyseg(proc *p, const elf_program *ph, const uint8_t *src) {
         if ((ph->p_flags & ELF_PFLAG_WRITE) == 0){
             virtual_memory_map(p->p_pagedir, page_va, page_va, PAGESIZE,
                    PTE_P | PTE_U);
-            log_printf("Program segment is readable -- PID: %d VA: %p\n", p->p_pid, page_va);
+            log_printf("Mapping Program segment %p as readable -- Process: %d\n", page_va, p->p_pid);
         }
 
     return 0;
