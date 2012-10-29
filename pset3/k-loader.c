@@ -51,15 +51,10 @@ int program_load(proc *p, int program_id) {
     // load each loadable program segment into memory
     elf_program *ph = (elf_program *) ((const uint8_t *) eh + eh->e_phoff);
     for (int i = 0; i < eh->e_phnum; ++i)
-	if (ph[i].p_type == ELF_PTYPE_LOAD){
+	if (ph[i].p_type == ELF_PTYPE_LOAD)
 	    if (copyseg(p, &ph[i], (const uint8_t *) eh + ph[i].p_offset) < 0)
 		return -1;
-      //  else if ((ph->p_flags & ELF_PFLAG_WRITE) == 0){
-      //      elf_program *eph = (elf_program *) eh + ph[i].p_offset;
-      //      virtual_memory_map(p->p_pagedir, (uintptr_t) eph->p_va, (uintptr_t) eph->p_va, PAGESIZE,
-      //             PTE_P | PTE_U);
-      //  }
-    }
+    
     // set the entry point from the ELF header
     p->p_registers.reg_eip = eh->e_entry;
     return 0;
@@ -79,8 +74,8 @@ static int copyseg(proc *p, const elf_program *ph, const uint8_t *src) {
 
     // allocate memory
     for (uintptr_t page_va = va; page_va < end_mem; page_va += PAGESIZE)
-	if (page_alloc(p->p_pagedir, page_va, p->p_pid) < 0)
-	    return -1;
+        if (page_alloc(p->p_pagedir, page_va, p->p_pid) < 0)
+            return -1;
     
     // ensure new memory mappings are active
     lcr3(p->p_pagedir);
@@ -89,9 +84,11 @@ static int copyseg(proc *p, const elf_program *ph, const uint8_t *src) {
     memset((uint8_t *) end_file, 0, end_mem - end_file);
     // if a program portion is only ever read, map it as only readable
     for (uintptr_t page_va = va; page_va < end_mem; page_va += PAGESIZE)
-        if ((ph->p_flags & ELF_PFLAG_WRITE) == 0)
+        if ((ph->p_flags & ELF_PFLAG_WRITE) == 0){
             virtual_memory_map(p->p_pagedir, page_va, page_va, PAGESIZE,
                    PTE_P | PTE_U);
+            log_printf("Program segment is readable -- PID: %d VA: %p\n", p->p_pid, page_va);
+        }
 
     return 0;
 }

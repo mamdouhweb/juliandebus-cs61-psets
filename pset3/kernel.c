@@ -322,12 +322,13 @@ void interrupt(struct registers *reg) {
                 int pageIsUserWritable=(pa&7)==7;
                 int pageIsUserReadable=(pa&(PTE_P|PTE_U))==(PTE_P|PTE_U);
                 if(pageIsUserWritable){
+                    log_printf("Writable! %d %p %d %d %p\n",child->p_pid, va ,pageIsUserWritable, pageIsUserReadable, pa);
                     uintptr_t freePhysicalAddress=m_alloc(child->p_pid); 
                     memcpy((char *)freePhysicalAddress, (char *)PTE_ADDR(pa), PAGESIZE);
                     virtual_memory_map(forkdir, va, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
                 }
                 else if(pageIsUserReadable) {
-                    log_printf("Enter! %p %d %d %p\n",va ,pageIsUserWritable, pageIsUserReadable, pa);
+                    log_printf("Readable! %d %p %d %d %p\n",child->p_pid, va ,pageIsUserWritable, pageIsUserReadable, pa);
                     virtual_memory_map(forkdir, va, PTE_ADDR(pa), PAGESIZE, PTE_P|PTE_W|PTE_U);
                     ++pageinfo[PAGENUMBER(PTE_ADDR(pa))].refcount;
                 }
