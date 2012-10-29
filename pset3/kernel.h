@@ -162,3 +162,5 @@ void log_printf(const char *format, ...) __attribute__((noinline));
 void log_vprintf(const char *format, va_list val) __attribute__((noinline));
 
 #endif
+
+uintptr_t freeAddress(void);

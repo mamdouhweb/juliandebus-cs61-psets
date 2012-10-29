@@ -292,12 +292,14 @@ void interrupt(struct registers *reg) {
     
     case INT_SYS_FORK:{
         int slot=-1;
+        // find a free process slot
         for (int i=1;i<NPROC;++i){
             if(processes[i].p_state==P_FREE){
                 slot=i;
                 break;
             }
         }
+        // if no slot can be found -> return -1
         if(slot==-1){
             current->p_registers.reg_eax=-1;
             run(current);
@@ -306,21 +308,29 @@ void interrupt(struct registers *reg) {
         else {
             proc *father=current;
             proc *child=&processes[slot];
+            // initialize child process
             child->p_pid=slot;
             child->p_registers=father->p_registers;
             child->p_registers.reg_eax=0;
             child->p_state=P_RUNNABLE;
+            // copy the father's pagedirectory
             pageentry_t *forkdir=copy_pagedir(father->p_pagedir,child->p_pid);
-
+            // make a physical copy every user writable page and map the copy in the child's pagedirectory
             for (int i=PAGENUMBER(PROC_START_ADDR);i<PAGENUMBER(MEMSIZE_VIRTUAL);++i){
                 uintptr_t va=i<<PAGESHIFT;
                 uintptr_t pa=virtual_memory_lookup(father->p_pagedir,va);
                 int pageIsUserWritable=(pa&7)==7;
-                if(!pageIsUserWritable)
-                    continue;
-                uintptr_t freePhysicalAddress=m_alloc(child->p_pid); 
-                memcpy((char *)freePhysicalAddress, (char *)PTE_ADDR(pa), PAGESIZE);
-                virtual_memory_map(forkdir, va, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
+                int pageIsUserReadable=(pa&(PTE_P|PTE_U))==(PTE_P|PTE_U);
+                if(pageIsUserWritable){
+                    uintptr_t freePhysicalAddress=m_alloc(child->p_pid); 
+                    memcpy((char *)freePhysicalAddress, (char *)PTE_ADDR(pa), PAGESIZE);
+                    virtual_memory_map(forkdir, va, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
+                }
+                else if(pageIsUserReadable) {
+                    log_printf("Enter! %p %d %d %p\n",va ,pageIsUserWritable, pageIsUserReadable, pa);
+                    virtual_memory_map(forkdir, va, PTE_ADDR(pa), PAGESIZE, PTE_P|PTE_W|PTE_U);
+                    ++pageinfo[PAGENUMBER(PTE_ADDR(pa))].refcount;
+                }
             }
             child->p_pagedir=forkdir;
             father->p_registers.reg_eax=child->p_pid;
