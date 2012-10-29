@@ -84,11 +84,9 @@ static int copyseg(proc *p, const elf_program *ph, const uint8_t *src) {
     memset((uint8_t *) end_file, 0, end_mem - end_file);
     // if a program portion is only ever read, map it as only readable
     for (uintptr_t page_va = va; page_va < end_mem; page_va += PAGESIZE)
-        if ((ph->p_flags & ELF_PFLAG_WRITE) == 0){
+        if ((ph->p_flags & ELF_PFLAG_WRITE) == 0)
             virtual_memory_map(p->p_pagedir, page_va, page_va, PAGESIZE,
                    PTE_P | PTE_U);
-            log_printf("Mapping Program segment %p as readable -- Process: %d\n", page_va, p->p_pid);
-        }
 
     return 0;
 }

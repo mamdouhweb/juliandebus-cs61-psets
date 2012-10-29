@@ -96,9 +96,14 @@ void start(const char *command) {
 	processes[i].p_state = P_FREE;
     }
     
+    // map kernel pages below console as read-only
     virtual_memory_map(kernel_pagedir, 0, 0, (size_t)console, PTE_P|PTE_W);
-    virtual_memory_map(kernel_pagedir,(uintptr_t) console+PAGESIZE,(uintptr_t) console+PAGESIZE, 
-                            (size_t)(PROC_START_ADDR-((uintptr_t)console+PAGESIZE)), PTE_P|PTE_W);
+    // map kernel pages above console as read-only
+    virtual_memory_map(kernel_pagedir,(uintptr_t) console+PAGESIZE,
+                       (uintptr_t) console+PAGESIZE, 
+                        (size_t)(PROC_START_ADDR-((uintptr_t)console+PAGESIZE)),
+                        PTE_P|PTE_W
+                        );
 
     if (command && strcmp(command, "fork") == 0)
 	process_setup(1, 4);
@@ -156,11 +161,15 @@ void process_setup(pid_t pid, int program_number) {
     
     int r = program_load(&processes[pid], program_number);
     assert(r >= 0);
-    processes[pid].p_registers.reg_esp = MEMSIZE_VIRTUAL;// PROC_START_ADDR + PROC_SIZE * pid;
+    // set the stack to the top of the virtaul memory
+    processes[pid].p_registers.reg_esp = MEMSIZE_VIRTUAL;
+    // allocate a free physical page and map it in the process page directory
     uintptr_t procStack=freeAddress();
     my_page_alloc(procStack, pid);
-    virtual_memory_map(processes[pid].p_pagedir,processes[pid].p_registers.reg_esp - PAGESIZE,procStack,PAGESIZE,PTE_P | PTE_W | PTE_U);
-    
+    virtual_memory_map(processes[pid].p_pagedir, 
+                        processes[pid].p_registers.reg_esp - PAGESIZE,
+                        procStack, PAGESIZE, PTE_P|PTE_W|PTE_U
+                        );
     processes[pid].p_state = P_RUNNABLE;
 }
 
@@ -263,10 +272,10 @@ void interrupt(struct registers *reg) {
         run(current);
 	}
 	//map requested virtual memory address to found physical memory address
-	// virtual_memory_map(current->p_pagedir, current->p_registers.reg_eax, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
-	virtual_memory_map(current->p_pagedir, current->p_registers.reg_eax, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
-	//current->p_registers.reg_eax = page_alloc(current->p_pagedir, current->p_registers.reg_eax, current->p_pid);
-	current->p_registers.reg_eax = my_page_alloc(freePhysicalAddress, current->p_pid);
+	virtual_memory_map(current->p_pagedir, current->p_registers.reg_eax,
+                        freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
+	current->p_registers.reg_eax = my_page_alloc(freePhysicalAddress,
+                                                    current->p_pid);
 	run(current);
     }
     
@@ -319,16 +328,14 @@ void interrupt(struct registers *reg) {
             for (int i=PAGENUMBER(PROC_START_ADDR);i<PAGENUMBER(MEMSIZE_VIRTUAL);++i){
                 uintptr_t va=i<<PAGESHIFT;
                 uintptr_t pa=virtual_memory_lookup(father->p_pagedir,va);
-                int pageIsUserWritable=(pa&7)==7;
+                int pageIsUserWritable=(pa&(PTE_P|PTE_U|PTE_W))==(PTE_P|PTE_U|PTE_W);
                 int pageIsUserReadable=(pa&(PTE_P|PTE_U))==(PTE_P|PTE_U);
                 if(pageIsUserWritable){
-                    log_printf("Page at address %p is writable! --  Process %d Dad: %d\n", va, child->p_pid, father->p_pid);
                     uintptr_t freePhysicalAddress=m_alloc(child->p_pid); 
                     memcpy((char *)freePhysicalAddress, (char *)PTE_ADDR(pa), PAGESIZE);
                     virtual_memory_map(forkdir, va, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
                 }
                 else if(pageIsUserReadable) {
-                    log_printf("Page at address %p is readable! --  Process %d Dad: %d\n", va, child->p_pid, father->p_pid);
                     virtual_memory_map(forkdir, va, PTE_ADDR(pa), PAGESIZE, PTE_P|PTE_U);
                     ++pageinfo[PAGENUMBER(PTE_ADDR(pa))].refcount;
                 }
@@ -445,9 +452,6 @@ void virtual_memory_check(void) {
 	    expected_refcount = 1;
 	}
    
-    if(pageinfo[PAGENUMBER(pagedir)].owner != expected_owner) 
-        log_printf("%d %d\n",pageinfo[PAGENUMBER(pagedir)].owner,expected_owner);
-
     // Check page directory itself
 	assert(pageinfo[PAGENUMBER(pagedir)].owner == expected_owner);
 	assert(pageinfo[PAGENUMBER(pagedir)].refcount == expected_refcount);
