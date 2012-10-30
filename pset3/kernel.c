@@ -201,13 +201,26 @@ uintptr_t m_alloc(int8_t owner){
     return freePhysicalAddress;
 }
 
+// frees physical page at offset addr
+void m_free(uintptr_t addr){
+    --pageinfo[PAGENUMBER(addr)].refcount;
+    int referenceCount = pageinfo[PAGENUMBER(addr)].refcount;
+    if (referenceCount==-1){
+        log_printf("Page with reference count of 0 was freed!");
+        assert(0);
+    }    
+    if (referenceCount==0)
+        pageinfo[PAGENUMBER(addr)].owner=PO_FREE;
+    return;
+}
+
 int my_page_alloc(uintptr_t addr, int8_t owner) {
     if ((addr & 0xFFF) != 0 || addr >= MEMSIZE_PHYSICAL
 	|| pageinfo[PAGENUMBER(addr)].refcount != 0)
 	return -1;
     else {
-	pageinfo[PAGENUMBER(addr)].refcount = 1;
-	pageinfo[PAGENUMBER(addr)].owner = owner;
+        pageinfo[PAGENUMBER(addr)].refcount = 1;
+        pageinfo[PAGENUMBER(addr)].owner = owner;
 	return 0;
     }
 }
@@ -255,6 +268,26 @@ void interrupt(struct registers *reg) {
 
     case INT_SYS_PANIC:
 	panic("%s", (char *) current->p_registers.reg_eax);
+
+    case INT_SYS_EXIT:{
+        log_printf("Process %d is about to be freed! %d\n", current->p_pid, current->p_state);
+        current->p_state=P_FREE;
+        log_printf("Process %d is about to be freed! %d\n", current->p_pid, current->p_state);
+        pageentry_t *processdir=current->p_pagedir;
+        for (int i=PAGENUMBER(PROC_START_ADDR);i<PAGENUMBER(MEMSIZE_VIRTUAL);++i){
+            uintptr_t pa = virtual_memory_lookup(processdir,i<<PAGESHIFT); 
+            int pageIsPresent = (pa&PTE_P) == PTE_P;
+            if (!pageIsPresent)
+                continue;
+            m_free(pa);
+        }
+        pageentry_t *pagetable=(pageentry_t *)PTE_ADDR(processdir[0]);
+        pageinfo[PAGENUMBER(PTE_ADDR(pagetable))].owner=PO_FREE;
+        m_free((uintptr_t)pagetable);
+        m_free((uintptr_t)processdir);
+        schedule();
+    }
+
 
     case INT_SYS_GETPID:
 	current->p_registers.reg_eax = current->p_pid;
