@@ -1,3 +1,4 @@
+// vim: set tabstop=8: -*- tab-width: 8 -*-
 #ifndef WEENSYOS_KERNEL_H
 #define WEENSYOS_KERNEL_H
 #include "x86.h"
