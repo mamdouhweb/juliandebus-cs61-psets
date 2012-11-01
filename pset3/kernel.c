@@ -131,24 +131,24 @@ pageentry_t *copy_pagedir(pageentry_t *pagedir, pid_t owner){
     if ((int)processdir==-1||(int)processpage==-1)
         return (pageentry_t *)-1;
 
-	//set the first page to 0
-	memset(processdir,0,PAGESIZE);
+    //set the first page to 0
+    memset(processdir,0,PAGESIZE);
 
     //set the first entry of the directory to be the address of the new page
-	processdir[0]=(pageentry_t) processpage | PTE_P | PTE_W | PTE_U;
+    processdir[0]=(pageentry_t) processpage | PTE_P | PTE_W | PTE_U;
 
-	//calculate the offset (in bytes) inside pagetable
+    //calculate the offset (in bytes) inside pagetable
     int offset=PAGENUMBER(PROC_START_ADDR)*sizeof(pageentry_t); //1024
 	
     //construct a pointer from the passed in page directory to its pagetable page
-	//(strip away the permission bits)
+    //(strip away the permission bits)
     pageentry_t *pdpagetable=(pageentry_t *)PTE_ADDR(pagedir[0]);
 
-	//copy the contents of the kernel directory page to the newly created one
-	memcpy(processpage, pdpagetable,offset);
+    //copy the contents of the kernel directory page to the newly created one
+    memcpy(processpage, pdpagetable,offset);
 
-	//0out everything above the offset
-	memset((char *)processpage+offset,0,PAGESIZE-offset);
+    //0out everything above the offset
+    memset((char *)processpage+offset,0,PAGESIZE-offset);
 
     return processdir;
 }
@@ -163,13 +163,15 @@ void process_setup(pid_t pid, int program_number) {
     current->p_pid=pid;
     processes[pid].p_pagedir = copy_pagedir(kernel_pagedir, current->p_pid);
     
+    if ((int)processes[pid].p_pagedir==-1)
+        return;
+
     int r = program_load(&processes[pid], program_number);
     assert(r >= 0);
     // set the stack to the top of the virtaul memory
     processes[pid].p_registers.reg_esp = MEMSIZE_VIRTUAL;
     // allocate a free physical page and map it in the process page directory
-    uintptr_t procStack=freeAddress();
-    my_page_alloc(procStack, pid);
+    uintptr_t procStack=m_alloc(pid);
     virtual_memory_map(processes[pid].p_pagedir, 
                         processes[pid].p_registers.reg_esp - PAGESIZE,
                         procStack, PAGESIZE, PTE_P|PTE_W|PTE_U
@@ -405,7 +407,8 @@ void interrupt(struct registers *reg) {
                 // create copy of father's page for child
                 memcpy((char *)freePhysicalAddress, (char *)PTE_ADDR(pa), PAGESIZE);
                 // map copied page in child's pagedir
-                virtual_memory_map(forkdir, va, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
+                virtual_memory_map(forkdir, va, freePhysicalAddress,
+                                        PAGESIZE, PTE_P|PTE_W|PTE_U);
             }
             // map page in pagedir and increase reference count
             else if(pageIsUserReadable) {
