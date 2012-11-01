@@ -19,4 +19,4 @@ NOTES FOR THE GRADER (if any):
 
 EXTRA CREDIT ATTEMPTED (if any):
 I started on step 7, but wasn't able to iron out all memory bugs.
-My current version is in branch 'step7'.
+My (unfinished) version of this step is in branch 'step7'.
