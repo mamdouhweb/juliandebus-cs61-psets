@@ -83,7 +83,7 @@ static int copyseg(proc *p, const elf_program *ph, const uint8_t *src) {
 
     memcpy((uint8_t *) va, src, end_file - va);
     memset((uint8_t *) end_file, 0, end_mem - end_file);
-    // if a program portion is only ever read, map it as only readable
+    // if a program portion is only ever read, map it only as readable
     for (uintptr_t page_va = va; page_va < end_mem; page_va += PAGESIZE)
         if ((ph->p_flags & ELF_PFLAG_WRITE) == 0)
             virtual_memory_map(p->p_pagedir, page_va, page_va, PAGESIZE,
