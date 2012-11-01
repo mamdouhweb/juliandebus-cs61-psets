@@ -59,7 +59,7 @@ static pageinfo_t pageinfo[NPAGES];
 
 typedef enum pageowner {
     PO_FREE = 0,		// this page is free
-    PO_RESERVED = -1,		// this page is reserved memory
+    PO_RESERVED = -1,	// this page is reserved memory
     PO_KERNEL = -2		// this page is used by the kernel
 } pageowner_t;
 
@@ -76,6 +76,7 @@ void memshow_virtual_animate(void);
 
 int page_alloc(pageentry_t *pagedir, uintptr_t addr, int8_t owner);
 int my_page_alloc(uintptr_t addr, int8_t owner);
+uintptr_t m_alloc(pid_t owner);
 
 // start(command)
 //    Initialize the hardware and processes and start running. The `command`
@@ -120,12 +121,10 @@ void start(const char *command) {
 
 pageentry_t *copy_pagedir(pageentry_t *pagedir, pid_t owner){
 	//init a pointer to the new (to be created) page directory
-	pageentry_t *processdir=(pageentry_t *)freeAddress();
-	my_page_alloc((uintptr_t)processdir,owner);
+	pageentry_t *processdir=(pageentry_t *)m_alloc(owner);
     
     //init a pointer to the new (to be created) page
-	pageentry_t *processpage=(pageentry_t *)freeAddress();
-	my_page_alloc((uintptr_t)processpage,owner);
+	pageentry_t *processpage=(pageentry_t *)m_alloc(owner);
 	
 	//set the first page to 0
 	memset(processdir,0,PAGESIZE);
@@ -193,7 +192,7 @@ int page_alloc(pageentry_t *pagedir, uintptr_t addr, int8_t owner) {
     }
 }
 
-uintptr_t m_alloc(int8_t owner){
+uintptr_t m_alloc(pid_t owner){
     uintptr_t freePhysicalAddress=freeAddress();
     if(freePhysicalAddress==-1)
         return -1;
@@ -205,12 +204,56 @@ uintptr_t m_alloc(int8_t owner){
 void m_free(uintptr_t addr){
     --pageinfo[PAGENUMBER(addr)].refcount;
     int referenceCount = pageinfo[PAGENUMBER(addr)].refcount;
-    if (referenceCount==-1){
-        log_printf("Page with reference count of 0 was freed!");
+    if (referenceCount<0){
+        log_printf("Page %p with reference count of 0 was freed!",addr);
         assert(0);
-    }    
-    if (referenceCount==0)
+    }
+    else if (referenceCount==0){
         pageinfo[PAGENUMBER(addr)].owner=PO_FREE;
+        return;
+    }
+    else {
+        // check which process references page and assign it as owner
+        for (int i=1;i<NPROC;++i){
+            if(processes[i].p_state!=P_RUNNABLE)
+                continue;
+            proc *p=&processes[i];
+            //Check if physical page is referenced by virtual page
+            for (int j=0;j<NPAGES;++j){
+                if(PTE_ADDR(virtual_memory_lookup(p->p_pagedir,j<<PAGESHIFT))==addr){
+                    log_printf("Page %p gets assigned to process %d\n",addr,i);
+                    pageinfo[PAGENUMBER(addr)].owner=i;
+                    return;
+                }
+            }
+        }
+    }
+    return;
+}
+
+void m_releaseMemoryforProcess(proc *p){
+    p->p_state=P_BLOCKED;
+//    pageentry_t *processdir=p->p_pagedir;
+//    for (int i=PAGENUMBER(PROC_START_ADDR);i<PAGENUMBER(MEMSIZE_VIRTUAL);++i){
+//        uintptr_t pa = virtual_memory_lookup(processdir,i<<PAGESHIFT); 
+//        int pageIsPresent = (pa&PTE_P) == PTE_P;
+//        pa=PTE_ADDR(pa);
+//        if (pageIsPresent){
+//            m_free(pa);
+//        }
+//    }
+//    pageentry_t *pagetable=(pageentry_t *)PTE_ADDR(processdir[0]);
+//    m_free((uintptr_t)pagetable);
+//    m_free((uintptr_t)processdir);
+    for (int i=0;i<PAGENUMBER(MEMSIZE_PHYSICAL);++i) {
+        if(pageinfo[i].owner==p->p_pid){
+            m_free(i<<PAGESHIFT);
+        }
+    }
+    for (int i=0;i<PAGENUMBER(MEMSIZE_PHYSICAL);++i){
+        assert(pageinfo[i].owner!=p->p_pid);
+    }
+    p->p_state=P_FREE;
     return;
 }
 
@@ -270,21 +313,8 @@ void interrupt(struct registers *reg) {
 	panic("%s", (char *) current->p_registers.reg_eax);
 
     case INT_SYS_EXIT:{
-        log_printf("Process %d is about to be freed! %d\n", current->p_pid, current->p_state);
-        current->p_state=P_FREE;
-        log_printf("Process %d is about to be freed! %d\n", current->p_pid, current->p_state);
-        pageentry_t *processdir=current->p_pagedir;
-        for (int i=PAGENUMBER(PROC_START_ADDR);i<PAGENUMBER(MEMSIZE_VIRTUAL);++i){
-            uintptr_t pa = virtual_memory_lookup(processdir,i<<PAGESHIFT); 
-            int pageIsPresent = (pa&PTE_P) == PTE_P;
-            if (!pageIsPresent)
-                continue;
-            m_free(pa);
-        }
-        pageentry_t *pagetable=(pageentry_t *)PTE_ADDR(processdir[0]);
-        pageinfo[PAGENUMBER(PTE_ADDR(pagetable))].owner=PO_FREE;
-        m_free((uintptr_t)pagetable);
-        m_free((uintptr_t)processdir);
+        log_printf("Process %d is about to exit! %d\n", current->p_pid, current->p_state);
+        m_releaseMemoryforProcess(current);
         schedule();
     }
 
@@ -298,7 +328,7 @@ void interrupt(struct registers *reg) {
 
     case INT_SYS_PAGE_ALLOC: {
     //find free physical Address
-    uintptr_t freePhysicalAddress = freeAddress();
+    uintptr_t freePhysicalAddress = m_alloc(current->p_pid);
 	//update pageinfo[]
 	if(freePhysicalAddress==-1){
         current->p_registers.reg_eax=-1;
@@ -307,8 +337,7 @@ void interrupt(struct registers *reg) {
 	//map requested virtual memory address to found physical memory address
 	virtual_memory_map(current->p_pagedir, current->p_registers.reg_eax,
                         freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
-	current->p_registers.reg_eax = my_page_alloc(freePhysicalAddress,
-                                                    current->p_pid);
+	current->p_registers.reg_eax = freePhysicalAddress;
 	run(current);
     }
     
@@ -357,6 +386,7 @@ void interrupt(struct registers *reg) {
             child->p_state=P_RUNNABLE;
             // copy the father's pagedirectory
             pageentry_t *forkdir=copy_pagedir(father->p_pagedir, child->p_pid);
+            child->p_pagedir=forkdir;
             // make a physical copy every user writable page and map the copy in the child's pagedirectory
             for (int i=PAGENUMBER(PROC_START_ADDR);i<PAGENUMBER(MEMSIZE_VIRTUAL);++i){
                 uintptr_t va=i<<PAGESHIFT;
@@ -365,6 +395,15 @@ void interrupt(struct registers *reg) {
                 int pageIsUserReadable=(pa&(PTE_P|PTE_U))==(PTE_P|PTE_U);
                 if(pageIsUserWritable){
                     uintptr_t freePhysicalAddress=m_alloc(child->p_pid); 
+                    //there is not enough physical memory to execute this fork request
+                    if(freePhysicalAddress==-1){
+                        log_printf("Insufficient phyiscal memory for process: %d\n",child->p_pid);
+                        m_releaseMemoryforProcess(child);
+                        
+                        father->p_registers.reg_eax=-1;
+                        run(father);
+                        return;
+                    }
                     memcpy((char *)freePhysicalAddress, (char *)PTE_ADDR(pa), PAGESIZE);
                     virtual_memory_map(forkdir, va, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
                 }
@@ -373,7 +412,6 @@ void interrupt(struct registers *reg) {
                     ++pageinfo[PAGENUMBER(PTE_ADDR(pa))].refcount;
                 }
             }
-            child->p_pagedir=forkdir;
             father->p_registers.reg_eax=child->p_pid;
             run(father);
         }
@@ -485,6 +523,7 @@ void virtual_memory_check(void) {
 	    expected_refcount = 1;
 	}
    
+    //log_printf("PI %d E %d\n", pageinfo[PAGENUMBER(pagedir)].owner, expected_owner);
     // Check page directory itself
 	assert(pageinfo[PAGENUMBER(pagedir)].owner == expected_owner);
 	assert(pageinfo[PAGENUMBER(pagedir)].refcount == expected_refcount);
