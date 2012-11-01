@@ -18,5 +18,10 @@ NOTES FOR THE GRADER (if any):
 
 
 EXTRA CREDIT ATTEMPTED (if any):
-I started on step 7, but wasn't able to iron out all memory bugs.
-My (unfinished) version of this step is in branch 'step7'.
+I tried implementing step 7 and (after fighting with
+quite a few memory bugs) got it to work :)
+
+The sneakiest bug of all was that I hadn't considered
+that upon copying a processes pagedirectory, the OS
+can run out of memory as well, causing zombie page
+directories to haunt my memory :)
