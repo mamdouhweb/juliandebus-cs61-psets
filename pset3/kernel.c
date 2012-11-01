@@ -125,7 +125,11 @@ pageentry_t *copy_pagedir(pageentry_t *pagedir, pid_t owner){
     
     //init a pointer to the new (to be created) page
 	pageentry_t *processpage=(pageentry_t *)m_alloc(owner);
-	
+
+    //if not enough memory was physical memory is available -> return
+    if ((int)processdir==-1||(int)processpage==-1)
+        return (pageentry_t *)-1;
+
 	//set the first page to 0
 	memset(processdir,0,PAGESIZE);
 
@@ -196,7 +200,8 @@ uintptr_t m_alloc(pid_t owner){
     uintptr_t freePhysicalAddress=freeAddress();
     if(freePhysicalAddress==-1)
         return -1;
-    my_page_alloc(freePhysicalAddress,owner);
+    if(my_page_alloc(freePhysicalAddress,owner)==-1)
+        return -1;
     return freePhysicalAddress;
 }
 
@@ -313,7 +318,6 @@ void interrupt(struct registers *reg) {
 	panic("%s", (char *) current->p_registers.reg_eax);
 
     case INT_SYS_EXIT:{
-        log_printf("Process %d is about to exit! %d\n", current->p_pid, current->p_state);
         m_releaseMemoryforProcess(current);
         schedule();
     }
@@ -327,7 +331,6 @@ void interrupt(struct registers *reg) {
 	schedule();
 
     case INT_SYS_PAGE_ALLOC: {
-    //find free physical Address
     uintptr_t freePhysicalAddress = m_alloc(current->p_pid);
 	//update pageinfo[]
 	if(freePhysicalAddress==-1){
@@ -376,45 +379,55 @@ void interrupt(struct registers *reg) {
             run(current);
             return;
         }
-        else {
-            proc *father=current;
-            proc *child=&processes[slot];
-            // initialize child process
-            child->p_pid=slot;
-            child->p_registers=father->p_registers;
-            child->p_registers.reg_eax=0;
-            child->p_state=P_RUNNABLE;
-            // copy the father's pagedirectory
-            pageentry_t *forkdir=copy_pagedir(father->p_pagedir, child->p_pid);
-            child->p_pagedir=forkdir;
-            // make a physical copy every user writable page and map the copy in the child's pagedirectory
-            for (int i=PAGENUMBER(PROC_START_ADDR);i<PAGENUMBER(MEMSIZE_VIRTUAL);++i){
-                uintptr_t va=i<<PAGESHIFT;
-                uintptr_t pa=virtual_memory_lookup(father->p_pagedir,va);
-                int pageIsUserWritable=(pa&(PTE_P|PTE_U|PTE_W))==(PTE_P|PTE_U|PTE_W);
-                int pageIsUserReadable=(pa&(PTE_P|PTE_U))==(PTE_P|PTE_U);
-                if(pageIsUserWritable){
-                    uintptr_t freePhysicalAddress=m_alloc(child->p_pid); 
-                    //there is not enough physical memory to execute this fork request
-                    if(freePhysicalAddress==-1){
-                        log_printf("Insufficient phyiscal memory for process: %d\n",child->p_pid);
-                        m_releaseMemoryforProcess(child);
-                        
-                        father->p_registers.reg_eax=-1;
-                        run(father);
-                        return;
-                    }
-                    memcpy((char *)freePhysicalAddress, (char *)PTE_ADDR(pa), PAGESIZE);
-                    virtual_memory_map(forkdir, va, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
-                }
-                else if(pageIsUserReadable) {
-                    virtual_memory_map(forkdir, va, PTE_ADDR(pa), PAGESIZE, PTE_P|PTE_U);
-                    ++pageinfo[PAGENUMBER(PTE_ADDR(pa))].refcount;
-                }
+        proc *father=current;
+        proc *child=&processes[slot];
+        // initialize child process
+        child->p_pid=slot;
+        child->p_registers=father->p_registers;
+        child->p_registers.reg_eax=0;
+        child->p_state=P_RUNNABLE;
+        // copy the father's pagedirectory
+        pageentry_t *forkdir=copy_pagedir(father->p_pagedir, child->p_pid);
+            //there is not enough physical memory to execute this fork request
+            if((int)forkdir==-1){
+                log_printf("Insufficient phyiscal memory for process: %d\n",child->p_pid);
+                m_releaseMemoryforProcess(child);
+                
+                father->p_registers.reg_eax=-1;
+                run(father);
+                return;
             }
-            father->p_registers.reg_eax=child->p_pid;
-            run(father);
+        child->p_pagedir=forkdir;
+        // make a physical copy every user writable page and map the copy in the child's pagedirectory
+        for (int i=PAGENUMBER(PROC_START_ADDR);i<PAGENUMBER(MEMSIZE_VIRTUAL);++i){
+            uintptr_t va=i<<PAGESHIFT;
+            uintptr_t pa=virtual_memory_lookup(father->p_pagedir,va);
+            int pageIsUserWritable=(pa&(PTE_P|PTE_U|PTE_W))==(PTE_P|PTE_U|PTE_W);
+            int pageIsUserReadable=(pa&(PTE_P|PTE_U))==(PTE_P|PTE_U);
+            if(pageIsUserWritable){
+                uintptr_t freePhysicalAddress=m_alloc(child->p_pid); 
+                //there is not enough physical memory to execute this fork request
+                if(freePhysicalAddress==-1){
+                    log_printf("Insufficient phyiscal memory for process: %d\n",child->p_pid);
+                    m_releaseMemoryforProcess(child);
+                    
+                    father->p_registers.reg_eax=-1;
+                    run(father);
+                    return;
+                }
+                //create copy of father's page for child
+                memcpy((char *)freePhysicalAddress, (char *)PTE_ADDR(pa), PAGESIZE);
+                //map copied page in child's pagedir
+                virtual_memory_map(forkdir, va, freePhysicalAddress, PAGESIZE, PTE_P|PTE_W|PTE_U);
+            }
+            else if(pageIsUserReadable) {
+                //map page in pagedir and increase reference count
+                virtual_memory_map(forkdir, va, PTE_ADDR(pa), PAGESIZE, PTE_P|PTE_U);
+                ++pageinfo[PAGENUMBER(PTE_ADDR(pa))].refcount;
+            }
         }
+        father->p_registers.reg_eax=child->p_pid;
+        run(father);
     }
 
     default:
