@@ -194,11 +194,13 @@ int page_alloc(pageentry_t *pagedir, uintptr_t addr, int8_t owner) {
     }
 }
 
+//find a free physical address and allocate it
 uintptr_t m_alloc(int8_t owner){
     uintptr_t freePhysicalAddress=freeAddress();
     if(freePhysicalAddress==-1)
         return -1;
-    my_page_alloc(freePhysicalAddress,owner);
+    if(my_page_alloc(freePhysicalAddress,owner)==-1)
+        return -1;
     return freePhysicalAddress;
 }
 
