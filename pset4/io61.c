@@ -4,6 +4,8 @@
 #include <limits.h>
 #include <errno.h>
 
+#define CHUNKS (4<<16)
+
 // io61_file
 //    Data structure for io61 file wrappers. Add your own stuff.
 
@@ -11,6 +13,14 @@ struct io61_file {
     int fd;
 };
 
+struct seq_buf {
+    struct io61_file *f;
+    char *buf;
+    int offset;
+};
+
+struct seq_buf rbuf;
+struct seq_buf wbuf;
 
 // io61_fdopen(fd, mode)
 //    Return a new io61_file that reads from and/or writes to the given
@@ -43,11 +53,36 @@ int io61_close(io61_file *f) {
 //    (which is -1) on error or end-of-file.
 
 int io61_readc(io61_file *f) {
-    unsigned char buf[1];
-    if (read(f->fd, buf, 1) == 1)
-        return buf[0];
-    else
-        return EOF;
+    // initialize the buffer
+    if(rbuf.f!=f){
+        rbuf.f=f;
+        free(rbuf.buf);
+        rbuf.buf=(char *)malloc(CHUNKS);
+        int readchars=read(f->fd, rbuf.buf, CHUNKS);
+        if (readchars<CHUNKS)
+            rbuf.buf[readchars]=EOF;
+        rbuf.offset=-1;
+    }
+    ++rbuf.offset;
+    // the buffer can still satisfy the request
+    if (rbuf.offset<CHUNKS){
+        if (rbuf.buf[rbuf.offset] != EOF){
+            return rbuf.buf[rbuf.offset];
+        }
+        else{
+            return EOF;
+        }
+    }
+    // the buffer needs to be refilled
+    else {
+        int readchars=read(f->fd, rbuf.buf, CHUNKS);
+        if (readchars==0)
+            return EOF;
+        if (readchars<CHUNKS)
+            rbuf.buf[readchars]=EOF;
+        rbuf.offset=-1;
+        return io61_readc(f);
+    }
 }
 
 
@@ -56,12 +91,24 @@ int io61_readc(io61_file *f) {
 //    -1 on error.
 
 int io61_writec(io61_file *f, int ch) {
-    unsigned char buf[1];
-    buf[0] = ch;
-    if (write(f->fd, buf, 1) == 1)
+    if(wbuf.f!=f) {
+        free(wbuf.buf);
+        wbuf.buf=(char *)malloc(CHUNKS);
+        io61_flush(wbuf.f);
+        wbuf.f=f;
+        wbuf.offset=0;
+    }
+    // fill the buffer
+    if (wbuf.offset<CHUNKS){
+        wbuf.buf[wbuf.offset] = ch; 
+        ++wbuf.offset;
         return 0;
-    else
-        return -1;
+    }
+    // flush the buffer
+    else {
+        io61_flush(wbuf.f);
+        return io61_writec(f, ch);
+    }
 }
 
 
@@ -69,7 +116,10 @@ int io61_writec(io61_file *f, int ch) {
 //    Forces a write of any `f` buffers that contain data.
 
 int io61_flush(io61_file *f) {
-    (void) f;
+    if (wbuf.f==f&&wbuf.offset>0) {
+        write(f->fd, wbuf.buf, wbuf.offset);
+        wbuf.offset=0;
+    }
     return 0;
 }
 
