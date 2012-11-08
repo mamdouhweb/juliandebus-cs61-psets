@@ -16,7 +16,11 @@ struct io61_file {
 struct seq_buf {
     struct io61_file *f;
     char *buf;
-    int offset;
+    ssize_t offset;
+    ssize_t bufsize;
+    // Set to true if buf contains the whole file f or holds the last chunk
+    // of a file. Then, bufsize represents the size of the chunk in buf.
+    int bufDidSlurpFile;
 };
 
 struct seq_buf rbuf;
@@ -58,6 +62,7 @@ int io61_readc(io61_file *f) {
         rbuf.f=f;
         free(rbuf.buf);
         rbuf.buf=(char *)malloc(CHUNKS);
+        rbuf.bufsize=CHUNKS;
         int readchars=read(f->fd, rbuf.buf, CHUNKS);
         if (readchars<CHUNKS)
             rbuf.buf[readchars]=EOF;
@@ -65,7 +70,7 @@ int io61_readc(io61_file *f) {
     }
     ++rbuf.offset;
     // the buffer can still satisfy the request
-    if (rbuf.offset<CHUNKS){
+    if (rbuf.offset<rbuf.bufsize){
         if (rbuf.buf[rbuf.offset] != EOF){
             return rbuf.buf[rbuf.offset];
         }
@@ -78,7 +83,7 @@ int io61_readc(io61_file *f) {
         int readchars=read(f->fd, rbuf.buf, CHUNKS);
         if (readchars==0)
             return EOF;
-        if (readchars<CHUNKS)
+        if (readchars<rbuf.bufsize)
             rbuf.buf[readchars]=EOF;
         rbuf.offset=-1;
         return io61_readc(f);
@@ -131,18 +136,51 @@ int io61_flush(io61_file *f) {
 //    -1 an error occurred before any characters were read.
 
 ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
-    size_t nread = 0;
-    while (nread != sz) {
-        int ch = io61_readc(f);
-        if (ch == EOF)
-            break;
-        buf[nread] = ch;
-        ++nread;
+    int bufsize=16*sz;
+    // initialize the buffer
+    if(rbuf.f!=f) {
+        rbuf.f=f;
+        free(rbuf.buf);
+        rbuf.offset=0;
+        rbuf.bufDidSlurpFile=0;
+        rbuf.bufsize=bufsize;
+        rbuf.buf=(char *)malloc(rbuf.bufsize);
+        ssize_t readchars=read(f->fd, rbuf.buf, rbuf.bufsize);
+        // file has been completely read into buffer
+        if (readchars<rbuf.bufsize) {
+            rbuf.bufDidSlurpFile=1;
+            rbuf.bufsize=readchars;
+        }
     }
-    if (nread == 0 && sz != 0)
-        return -1;
-    else
-        return nread;
+    // The buffer can still satisfy the request
+    if (rbuf.offset+(ssize_t)sz<=rbuf.bufsize||rbuf.bufDidSlurpFile) {
+        // The whole request can be satisfied
+        if((ssize_t)sz<=rbuf.bufsize-rbuf.offset) {
+            memcpy(buf,&rbuf.buf[rbuf.offset],sz);
+            rbuf.offset+=sz;
+            return sz;
+        }
+        // The request can only be partially satisfied
+        // (The remaining chars in buffer are < sz)
+        else {
+            memcpy(buf,&rbuf.buf[rbuf.offset],rbuf.bufsize-rbuf.offset);
+            rbuf.offset+=rbuf.bufsize-rbuf.offset;
+            return rbuf.bufsize-rbuf.offset;
+        }
+    } 
+    // the buffer needs to be refilled
+    else {
+        //copy bytes that have not been returned to beginning of buffer
+        memcpy(rbuf.buf,&rbuf.buf[rbuf.offset],rbuf.bufsize-rbuf.offset);
+        rbuf.offset=0;
+        ssize_t readchars=read(f->fd, &rbuf.buf[rbuf.offset], rbuf.bufsize-rbuf.offset);
+        // file has been completely read into buffer
+        if (readchars<rbuf.bufsize-rbuf.offset) {
+            rbuf.bufDidSlurpFile=1;
+            rbuf.bufsize=readchars;
+        }
+        return io61_read(f,buf,sz);
+    }
 }
 
 
