@@ -4,7 +4,7 @@
 #include <limits.h>
 #include <errno.h>
 
-#define CHUNKS (4<<16)
+#define CHUNKS (4<<10)
 
 // io61_file
 //    Data structure for io61 file wrappers. Add your own stuff.
@@ -136,7 +136,7 @@ int io61_flush(io61_file *f) {
 //    -1 an error occurred before any characters were read.
 
 ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
-    int bufsize=16*sz;
+    int bufsize=8*sz;
     // initialize the buffer
     if(rbuf.f!=f) {
         rbuf.f=f;
@@ -190,16 +190,35 @@ ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
 //    an error occurred before any characters were written.
 
 ssize_t io61_write(io61_file *f, const char *buf, size_t sz) {
-    size_t nwritten = 0;
-    while (nwritten != sz) {
-        if (io61_writec(f, buf[nwritten]) == -1)
-            break;
-        ++nwritten;
+    ssize_t bufsize=16*sz;
+    // initialize the buffer
+    if(rbuf.f!=f) {
+        wbuf.f=f;
+        io61_flush(wbuf.f);
+        free(wbuf.buf);
+        wbuf.offset=0;
+        wbuf.bufsize=bufsize;
+        wbuf.buf=(char *)malloc(wbuf.bufsize);
     }
-    if (nwritten == 0 && sz != 0)
-        return -1;
-    else
-        return nwritten;
+    // fill the buffer
+    if (wbuf.offset+(ssize_t)sz<=rbuf.bufsize) {
+        memcpy(&wbuf.buf[wbuf.offset],buf,sz);
+        wbuf.offset+=sz;
+        return sz;
+    } 
+    // flush the buffer 
+    else {
+        io61_flush(wbuf.f);
+        // if the buffer can't fit the chunk -> expand buffer
+        // beware of buffer getting too large!!
+        if ((ssize_t)sz>wbuf.bufsize) {
+            free(wbuf.buf);
+            wbuf.offset=0;
+            wbuf.bufsize=bufsize;
+            wbuf.buf=(char *)malloc(wbuf.bufsize);
+        }
+        return io61_write(f, buf, sz);
+    }
 }
 
 
