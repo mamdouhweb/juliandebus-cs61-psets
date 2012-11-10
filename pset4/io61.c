@@ -97,9 +97,9 @@ int io61_readc(io61_file *f) {
 
 int io61_writec(io61_file *f, int ch) {
     if(wbuf.f!=f) {
+        io61_flush(wbuf.f);
         free(wbuf.buf);
         wbuf.buf=(char *)malloc(CHUNKS);
-        io61_flush(wbuf.f);
         wbuf.f=f;
         wbuf.offset=0;
     }
@@ -170,6 +170,7 @@ ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
     } 
     // the buffer needs to be refilled
     else {
+        char *temp=malloc(wbuf.bufsize);
         //copy bytes that have not been returned to beginning of buffer
         memcpy(rbuf.buf,&rbuf.buf[rbuf.offset],rbuf.bufsize-rbuf.offset);
         rbuf.offset=0;
