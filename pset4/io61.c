@@ -4,7 +4,7 @@
 #include <limits.h>
 #include <errno.h>
 
-#define PAGESIZE (4<<14)
+#define PAGESIZE (4<<10)
 
 // io61_file
 //    Data structure for io61 file wrappers. Add your own stuff.
@@ -159,6 +159,7 @@ int io61_flush(io61_file *f) {
 //    -1 an error occurred before any characters were read.
 
 ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
+    /*
     // initialize the buffer
     if (f->bufsize==0) {
         f->buf=(char *)malloc(PAGESIZE);
@@ -206,7 +207,19 @@ ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
             f->bufsize=readchars;
         }
         return io61_read(f,buf,sz);
-    }
+    }*/
+    size_t nread = 0;
+        while (nread != sz) {
+            int ch = io61_readc(f);
+            if (ch == EOF)
+                break;
+            buf[nread] = ch;
+            ++nread;
+        }
+        if (nread == 0 && sz != 0)
+            return -1;
+        else
+            return nread;
 }
 
 
