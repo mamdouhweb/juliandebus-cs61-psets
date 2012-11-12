@@ -11,14 +11,22 @@
 
 struct io61_file {
     int fd;
+    // size of the file represented by fd
+    ssize_t filesize;
+    // holds cache/mmaped file
     char *buf;
+    // offset within fd
+    ssize_t fdoffset;
+    // offset of passed out/read in bytes within *buf
     ssize_t offset;
+    // size of *buf
     ssize_t bufsize;
     // Set to true if buf contains the whole file f or holds the last chunk
     // of a file. Then, bufsize represents the size of the chunk in buf.
     int bufDidSlurpFile;
+    // Bool indicating whether we're likely dealing with a pipe
+    // and thus shouldn't expand the buffer futher
     int shouldStopExpanding;
-    ssize_t filesize;
 };
 
 // io61_fdopen(fd, mode)
@@ -76,8 +84,11 @@ int io61_readc(io61_file *f) {
         else{
             ssize_t readchars=read(f->fd, f->buf, lbufsize);
             //fprintf(stderr,"Read: %zu %zu\n",readchars,lbufsize);
-            if (readchars==0)
+            if ((int)readchars==0){
+                --f->offset;
+                //fprintf(stderr,"EOF\nEOF\nEOF\nEOF\nEOF\n");
                 return EOF;
+            }
             else if (readchars<lbufsize) {
                 f->bufsize=readchars;
                 f->offset=-1;
@@ -96,13 +107,18 @@ int io61_readc(io61_file *f) {
             free(f->buf);
             f->buf=(char *)malloc(lbufsize*2);
             f->bufsize*=2;
-            fprintf(stderr,"Expanding Buffer: %zu\n",f->bufsize);
+            //fprintf(stderr,"Expanding Buffer: %zu\n",f->bufsize);
         }
         ssize_t readchars=read(f->fd, f->buf, f->bufsize);
+        if(readchars==-1){
+            fprintf(stderr,"Error: %s\n",strerror(errno));
+        }
         assert(readchars!=-1);
         //fprintf(stderr,"Read: %zu\n",readchars);
-//        if (readchars==0)
-//            return EOF;
+        if (readchars==0){
+            fprintf(stderr,"EOF\n");
+            return EOF;
+        }
         if (readchars<f->bufsize)
             f->buf[readchars]=EOF;
         f->offset=-1;
@@ -159,6 +175,7 @@ int io61_flush(io61_file *f) {
 //    -1 an error occurred before any characters were read.
 
 ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
+    //fprintf(stderr,"Read Request for %zu bytes\n", sz);
     /*
     // initialize the buffer
     if (f->bufsize==0) {
@@ -209,17 +226,17 @@ ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
         return io61_read(f,buf,sz);
     }*/
     size_t nread = 0;
-        while (nread != sz) {
-            int ch = io61_readc(f);
-            if (ch == EOF)
-                break;
-            buf[nread] = ch;
-            ++nread;
-        }
-        if (nread == 0 && sz != 0)
-            return -1;
-        else
-            return nread;
+    while (nread != sz) {
+        int ch = io61_readc(f);
+        if (ch == EOF)
+            break;
+        buf[nread] = ch;
+        ++nread;
+    }
+    if (nread == 0 && sz != 0)
+        return -1;
+    else
+        return nread;
 }
 
 
@@ -244,13 +261,15 @@ ssize_t io61_write(io61_file *f, const char *buf, size_t sz) {
     } 
     // flush the buffer 
     else {
+        //fprintf(stderr,"Writing %zu bytes\n",f->offset);
         io61_flush(f);
         // if the buffer can't fit the chunk -> expand buffer
         // beware of buffer getting too large!!
         if ((ssize_t)sz>f->bufsize) {
+            fprintf(stderr,"Expanding Write Buffer: %zu\n",f->bufsize);
             free(f->buf);
             f->offset=0;
-            f->bufsize=bufsize;
+            f->bufsize*=2;
             f->buf=(char *)malloc(f->bufsize);
         }
         return io61_write(f, buf, sz);
