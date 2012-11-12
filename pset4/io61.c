@@ -94,10 +94,16 @@ io61_cache *buildCacheForPos(io61_file *f, size_t pos) {
 io61_cache *getCacheForPos(io61_file *f, size_t pos) {
     for (int i=0;i<NCACHES;++i) {
         io61_cache *currentCache=&f->caches[i];
-        if (currentCache->pos>=pos&&currentCache->pos+currentCache->bufsize<pos)
+        if (currentCache->pos>=pos&&currentCache->pos+currentCache->bufsize<pos){
+            f->currentCache=currentCache-f->caches;
             return currentCache;
+        }
     }
     return (io61_cache *)0;
+}
+
+io61_cache *getCurrentCache(io61_file *f) {
+    return &f->caches[f->currentCache]; 
 }
 
 // io61_fdopen(fd, mode)
