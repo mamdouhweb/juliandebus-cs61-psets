@@ -4,16 +4,44 @@
 #include <limits.h>
 #include <errno.h>
 
-#define PAGESIZE (4<<10)
+#define PAGESIZE (4<<11)
+#define NCACHES 5
 
 // io61_file
 //    Data structure for io61 file wrappers. Add your own stuff.
+
+typedef enum cache_status{
+    CACHE_EMPTY   = 1,
+    CACHE_ACTIVE  = 2,
+    CACHE_DRAINED = 4
+}cache_state;
+
+typedef struct io61_cache {
+    char *buf;
+    cache_state state;
+    size_t pos;
+    size_t offset;
+    size_t bufsize;
+    int lifetime;
+}io61_cache;
 
 struct io61_file {
     int fd;
     int mode;
     // size of the file represented by fd
     ssize_t filesize;
+    // Caches associated with file represented by fd
+    // Interaction shall only occur through 3 functions:
+    // getCurrentCache(io61_file *f) -- returns most recently used cache
+    // setCurrentCache(io61_file *f, io61_cache *cache) -- set
+    // buildCacheForPos(io61_file *f, size_t pos) -- creates a io61_cache element
+    //      and inserts it into the array. Returns a pointer to the created io61_cache element.
+    //      The least recently used element may be evicted. 
+    // getCacheForPos(io61_file *f, size_t pos) -- returns pointer to io61_cache
+    //      element on success and sets the current cache element, else 0
+    io61_cache caches[NCACHES];
+    // index into caches array
+    int currentCache;
     // holds cache/mmaped file
     char *buf;
     // offset within fd
@@ -22,13 +50,55 @@ struct io61_file {
     ssize_t offset;
     // size of *buf
     ssize_t bufsize;
-    // Set to true if buf contains the whole file f or holds the last chunk
-    // of a file. Then, bufsize represents the size of the chunk in buf.
-    int bufDidSlurpFile;
-    // Bool indicating whether we're likely dealing with a pipe
-    // and thus shouldn't expand the buffer futher
-    int shouldStopExpanding;
+//  // Set to true if buf contains the whole file f or holds the last chunk
+//  // of a file. Then, bufsize represents the size of the chunk in buf.
+//  int bufDidSlurpFile;
+//  // Bool indicating whether we're likely dealing with a pipe
+//  // and thus shouldn't expand the buffer futher
+//  //int shouldStopExpanding;
 };
+
+io61_cache *freeCache(io61_file *f) {
+    int oldestCache;
+    int maxLifetime = 0;
+    for (int i=0;i<NCACHES;++i) {
+        io61_cache *currentCache=&f->caches[i];
+        if (currentCache->state&(CACHE_EMPTY|CACHE_DRAINED))
+            return currentCache; 
+        oldestCache=currentCache->lifetime>maxLifetime?i:oldestCache;
+    }
+    // This cache has been in use and thus has a malloced buf
+    free(f->caches[oldestCache].buf);
+    return &f->caches[oldestCache];
+}
+
+io61_cache *buildCacheForPos(io61_file *f, size_t pos) {
+    io61_cache *newCache=freeCache(f);
+    newCache->state=CACHE_ACTIVE;
+    newCache->buf=malloc(PAGESIZE);
+    //pread(int d, void *buf, size_t nbyte, off_t offset);
+    size_t readchars=pread(f->fd, newCache->buf, PAGESIZE, (off_t)pos);
+    if (readchars<PAGESIZE) {
+        newCache->buf[readchars]=EOF;
+        newCache->bufsize=readchars;
+    }
+    else {
+        newCache->bufsize=PAGESIZE;
+    }
+    newCache->pos=pos;
+    newCache->offset=0;
+    newCache->lifetime=0;
+    return newCache;
+}
+
+io61_cache *getCacheForPos(io61_file *f, size_t pos) {
+    for (int i=0;i<NCACHES;++i) {
+        io61_cache *currentCache=&f->caches[i];
+        if (currentCache->pos>=pos&&currentCache->pos+currentCache->bufsize<pos)
+            return currentCache;
+    }
+    return (io61_cache *)0;
+}
 
 // io61_fdopen(fd, mode)
 //    Return a new io61_file that reads from and/or writes to the given
@@ -70,6 +140,7 @@ int io61_readc(io61_file *f) {
         f->buf=(char *)malloc(PAGESIZE);
         f->bufsize=PAGESIZE;
         int readchars=read(f->fd, f->buf, PAGESIZE);
+        f->fdoffset+=readchars;
         if (readchars<PAGESIZE)
             f->buf[readchars]=EOF;
         f->offset=-1;
@@ -84,6 +155,7 @@ int io61_readc(io61_file *f) {
     }
     else {
         size_t readchars=read(f->fd, f->buf, PAGESIZE);
+        f->fdoffset+=readchars;
         if (readchars<PAGESIZE)
             f->buf[readchars]=EOF;
         f->offset=-1;
@@ -265,6 +337,7 @@ int io61_seek(io61_file *f, size_t pos) {
         io61_flush(f);
     }
     else{
+        // force a reload of the cache
         f->offset=f->bufsize;
     }
     off_t r = lseek(f->fd, (off_t) pos, SEEK_SET);
