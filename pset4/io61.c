@@ -4,7 +4,7 @@
 #include <limits.h>
 #include <errno.h>
 
-#define PAGESIZE (4<<11)
+#define PAGESIZE (4<<10)
 #define NCACHES 5
 
 // io61_file
@@ -40,7 +40,7 @@ struct io61_file {
     // getCacheForPos(io61_file *f, size_t pos) -- returns pointer to io61_cache
     //      element on success and sets the current cache element, else 0
     io61_cache caches[NCACHES];
-    // index into caches array
+    // index into caches array, -1 if no current cache present
     int currentCache;
     // holds cache/mmaped file
     char *buf;
@@ -60,7 +60,7 @@ struct io61_file {
 
 io61_cache *freeCache(io61_file *f) {
     int oldestCache;
-    int maxLifetime = 0;
+    int maxLifetime = -1;
     for (int i=0;i<NCACHES;++i) {
         io61_cache *currentCache=&f->caches[i];
         if (currentCache->state&(CACHE_EMPTY|CACHE_DRAINED))
@@ -68,41 +68,54 @@ io61_cache *freeCache(io61_file *f) {
         oldestCache=currentCache->lifetime>maxLifetime?i:oldestCache;
     }
     // This cache has been in use and thus has a malloced buf
-    free(f->caches[oldestCache].buf);
+    if (f->caches[oldestCache].state&CACHE_ACTIVE)
+        free(f->caches[oldestCache].buf);
     return &f->caches[oldestCache];
 }
 
+// buildCacheForPos(io61_file *f, size_t pos) -- creates a io61_cache element
+//      and inserts it into the array. Returns a pointer to the created io61_cache element or
+//      -1 on error(EOF). The least recently used element may be evicted. 
 io61_cache *buildCacheForPos(io61_file *f, size_t pos) {
     io61_cache *newCache=freeCache(f);
-    newCache->state=CACHE_ACTIVE;
     newCache->buf=malloc(PAGESIZE);
     //pread(int d, void *buf, size_t nbyte, off_t offset);
-    size_t readchars=pread(f->fd, newCache->buf, PAGESIZE, (off_t)pos);
-    if (readchars<PAGESIZE) {
-        newCache->buf[readchars]=EOF;
-        newCache->bufsize=readchars;
+    // This doesn't work on non-seekable files :(
+    ssize_t readchars=pread(f->fd, newCache->buf, PAGESIZE, (off_t)pos);
+    if (readchars==-1) {
+        readchars=read(f->fd, newCache->buf, PAGESIZE);
     }
-    else {
-        newCache->bufsize=PAGESIZE;
+    //fprintf(stderr,"Size: %zd %s\n",readchars,strerror(errno));
+    // if nothing can be read into the buffer, return -1
+    if (readchars==0) {
+        newCache->state=CACHE_EMPTY;
+        return (io61_cache *)-1;
     }
+    newCache->bufsize=readchars;
     newCache->pos=pos;
     newCache->offset=0;
     newCache->lifetime=0;
+    newCache->state=CACHE_ACTIVE;
+    f->currentCache=newCache-f->caches;
     return newCache;
 }
 
 io61_cache *getCacheForPos(io61_file *f, size_t pos) {
+    io61_cache *foundCache=0;
     for (int i=0;i<NCACHES;++i) {
         io61_cache *currentCache=&f->caches[i];
-        if (currentCache->pos>=pos&&currentCache->pos+currentCache->bufsize<pos){
+        if (!foundCache&&currentCache->pos>=pos&&currentCache->pos+currentCache->bufsize<pos){
             f->currentCache=currentCache-f->caches;
-            return currentCache;
+            foundCache=currentCache;
         }
+        ++currentCache->lifetime;
     }
-    return (io61_cache *)0;
+    return foundCache;
 }
 
 io61_cache *getCurrentCache(io61_file *f) {
+    if (f->currentCache==-1)
+        return (io61_cache *)0;
     return &f->caches[f->currentCache]; 
 }
 
@@ -118,6 +131,7 @@ io61_file *io61_fdopen(int fd, int mode) {
     f->fd = fd;
     f->bufsize=0;
     f->mode=mode;
+    f->currentCache=-1;
     return f;
 }
 
@@ -141,30 +155,25 @@ int io61_close(io61_file *f) {
 
 int io61_readc(io61_file *f) {
     // initialize the buffer
-    if (f->bufsize==0) {
-        // start out with PAGESIZE
-        f->buf=(char *)malloc(PAGESIZE);
-        f->bufsize=PAGESIZE;
-        int readchars=read(f->fd, f->buf, PAGESIZE);
-        f->fdoffset+=readchars;
-        if (readchars<PAGESIZE)
-            f->buf[readchars]=EOF;
-        f->offset=-1;
-    }
-    ++f->offset;
-    if (f->offset<f->bufsize) {
-        if (f->buf[f->offset]==EOF){
-            --f->offset;
+    if (getCurrentCache(f)==0) {
+        // this sets the current cache
+        if(buildCacheForPos(f,0)==(io61_cache *)-1)
             return EOF;
-        }
-        return f->buf[f->offset];
+    }
+    io61_cache *currentCache=getCurrentCache(f);
+    //fprintf(stderr,"Offset: %zu Size: %zu\n",currentCache->offset,currentCache->bufsize);
+    // The current buffer can still satisfy the request
+    if (currentCache->offset<currentCache->bufsize) {
+        char returnChar=currentCache->buf[currentCache->offset];
+        //fprintf(stderr,"%c",returnChar);
+        ++currentCache->offset;
+        return returnChar;
     }
     else {
-        size_t readchars=read(f->fd, f->buf, PAGESIZE);
-        f->fdoffset+=readchars;
-        if (readchars<PAGESIZE)
-            f->buf[readchars]=EOF;
-        f->offset=-1;
+        // Request a new cache that covers the next bytes
+        // Here we could give the OS prefetching advice
+        if(buildCacheForPos(f,currentCache->pos+currentCache->offset)==(io61_cache *)-1)
+            return EOF;
         return io61_readc(f);
     }
 }
@@ -175,17 +184,17 @@ int io61_readc(io61_file *f) {
 //    -1 on error.
 
 int io61_writec(io61_file *f, int ch) {
-    if (f->bufsize==0) {
-        f->buf=(char *)malloc(PAGESIZE);
-        f->bufsize=PAGESIZE;
-        f->offset=0;
+    if (getCurrentCache(f)==0) {
+        f->currentCache=0;
+        f->caches[0].buf=malloc(PAGESIZE);
+        f->caches[0].bufsize=PAGESIZE;
+        f->caches[0].offset=0;
     }
-    ssize_t lbufsize=f->bufsize;
-    ssize_t loffset=f->offset;
+    io61_cache *currentCache=getCurrentCache(f);
     // fill the buffer
-    if (loffset<lbufsize){
-        f->buf[loffset] = ch; 
-        ++f->offset;
+    if (currentCache->offset<currentCache->bufsize) {
+        currentCache->buf[currentCache->offset] = ch; 
+        ++currentCache->offset;
         return 0;
     }
     // flush the buffer
@@ -200,9 +209,15 @@ int io61_writec(io61_file *f, int ch) {
 //    Forces a write of any `f` buffers that contain data.
 
 int io61_flush(io61_file *f) {
-    if (f->offset>0&&f->mode==O_WRONLY) {
-        write(f->fd, f->buf, f->offset);
-        f->offset=0;
+    if (f->mode!=O_WRONLY)
+        return 0;
+    for (int i=0;i<NCACHES;++i) {
+        io61_cache *currentCache=&f->caches[i];
+        if (currentCache->offset>0) {
+//            fprintf(stderr,"FLUSH!\n");
+            write(f->fd, currentCache->buf, currentCache->offset);
+            currentCache->offset=0;
+        }
     }
     return 0;
 }
@@ -215,62 +230,6 @@ int io61_flush(io61_file *f) {
 //    -1 an error occurred before any characters were read.
 
 ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
-    //fprintf(stderr,"Read Request for %zu bytes\n", sz);
-    // initialize the buffer
-    /*
-    if (f->bufsize==0) {
-        f->buf=(char *)malloc(PAGESIZE);
-        f->bufsize=PAGESIZE;
-        ssize_t readchars=read(f->fd, f->buf, f->bufsize);
-        f->offset=0;
-        f->bufDidSlurpFile=0;
-        f->filesize=io61_filesize(f);
-        //fprintf(stderr,"Filesize: %zu\n",(size_t)f->filesize);
-        // file has been completely read into buffer
-        if (readchars<f->bufsize) {
-            f->bufDidSlurpFile=1;
-            f->bufsize=readchars;
-        }
-    }
-    // The buffer can still satisfy the request
-    // The whole request can be satisfied
-    if (f->offset+(ssize_t)sz<=f->bufsize) {
-        memcpy(buf,&f->buf[f->offset],sz);
-        f->offset+=sz;
-        return sz;
-    }
-    // The request can only be partially satisfied
-    // (The remaining chars in buffer are < sz)
-    else if (f->bufDidSlurpFile) {
-        if (f->bufsize==f->offset){
-            assert(0);
-            return 0;
-        }
-        ssize_t charsToCopy=f->bufsize-f->offset;
-        memcpy(buf, &f->buf[f->offset], charsToCopy);
-        f->offset=f->bufsize;
-        return charsToCopy;
-    }
-    // the buffer needs to be refilled
-    else {
-        if((int)f->filesize>0) {
-            free(f->buf);
-            f->buf=(char *)malloc(f->bufsize*2);
-            f->bufsize*=2;
-            fprintf(stderr,"Expanding Buffer: %zu\n",f->bufsize);
-        }
-        //copy bytes that have not been returned to beginning of buffer
-        memcpy(f->buf,&f->buf[f->offset],f->bufsize-f->offset);
-        f->offset=0;
-        ssize_t readchars=read(f->fd, &f->buf[f->offset], f->bufsize-f->offset);
-        // file has been completely read into buffer
-        if (readchars<f->bufsize-f->offset) {
-            f->bufDidSlurpFile=1;
-            f->bufsize=readchars;
-        }
-        return io61_read(f,buf,sz);
-    }
-    */
     size_t nread = 0;
     while (nread != sz) {
         int ch = io61_readc(f);
@@ -293,34 +252,6 @@ ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
 //    an error occurred before any characters were written.
 
 ssize_t io61_write(io61_file *f, const char *buf, size_t sz) {
-    /*size_t bufsize=64*sz;
-    // initialize the buffer
-    if(f->bufsize==0) {
-        f->buf=(char *)malloc(bufsize);
-        f->bufsize=bufsize;
-        f->offset=0;
-    }
-    // fill the buffer
-    if (f->offset+(ssize_t)sz<=f->bufsize) {
-        memcpy(&f->buf[f->offset],buf,sz);
-        f->offset+=sz;
-        return sz;
-    } 
-    // flush the buffer 
-    else {
-        //fprintf(stderr,"Writing %zu bytes\n",f->offset);
-        io61_flush(f);
-        // if the buffer can't fit the chunk -> expand buffer
-        // beware of buffer getting too large!!
-        if ((ssize_t)sz>f->bufsize) {
-            fprintf(stderr,"Expanding Write Buffer: %zu\n",f->bufsize);
-            free(f->buf);
-            f->offset=0;
-            f->bufsize*=2;
-            f->buf=(char *)malloc(f->bufsize);
-        }
-        return io61_write(f, buf, sz);
-    }*/
     size_t nwritten = 0;
     while (nwritten != sz) {
         if (io61_writec(f, buf[nwritten]) == -1)
@@ -371,7 +302,6 @@ io61_file *io61_open_check(const char *filename, int mode) {
     else
         fd = STDOUT_FILENO;
     if (fd < 0) {
-        fprintf(stderr, "%s: %s\n", filename, strerror(errno));
         exit(1);
     }
     return io61_fdopen(fd, mode);
