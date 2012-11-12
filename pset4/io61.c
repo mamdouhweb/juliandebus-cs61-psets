@@ -75,53 +75,16 @@ int io61_readc(io61_file *f) {
         f->offset=-1;
     }
     ++f->offset;
-    ssize_t loffset=f->offset;
-    ssize_t lbufsize=f->bufsize;
-    // the buffer can still satisfy the request
-    if (loffset<lbufsize){
-        if (f->buf[loffset] != EOF){
-            ++f->fdoffset;
-            return f->buf[loffset];
-        }
-        else{
-            ssize_t readchars=read(f->fd, f->buf, lbufsize);
-            //fprintf(stderr,"Read: %zu %zu\n",readchars,lbufsize);
-            if ((int)readchars==0){
-                --f->offset;
-                //fprintf(stderr,"EOF\nEOF\nEOF\nEOF\nEOF\n");
-                return EOF;
-            }
-            else if (readchars<lbufsize) {
-                f->bufsize=readchars;
-                f->offset=-1;
-                f->buf[readchars]=EOF;
-                f->shouldStopExpanding=1;
-                return io61_readc(f);
-            }
-            f->offset=-1;
-            return io61_readc(f);
-        }
-    }
-    // the buffer needs to be refilled
-    else {
-        // expand the buffer
-        if(!f->shouldStopExpanding) {
-            free(f->buf);
-            f->buf=(char *)malloc(lbufsize*2);
-            f->bufsize*=2;
-            //fprintf(stderr,"Expanding Buffer: %zu\n",f->bufsize);
-        }
-        ssize_t readchars=read(f->fd, f->buf, f->bufsize);
-        if(readchars==-1){
-            fprintf(stderr,"Error: %s\n", strerror(errno));
-        }
-        assert(readchars!=-1);
-        //fprintf(stderr,"Read: %zu\n",readchars);
-        if (readchars==0){
-            fprintf(stderr,"EOF\n");
+    if (f->offset<f->bufsize) {
+        if (f->buf[f->offset]==EOF){
+            --f->offset;
             return EOF;
         }
-        if (readchars<f->bufsize)
+        return f->buf[f->offset];
+    }
+    else {
+        size_t readchars=read(f->fd, f->buf, PAGESIZE);
+        if (readchars<PAGESIZE)
             f->buf[readchars]=EOF;
         f->offset=-1;
         return io61_readc(f);
@@ -150,9 +113,6 @@ int io61_writec(io61_file *f, int ch) {
     // flush the buffer
     else {
         io61_flush(f);
-        free(f->buf);
-        f->buf=(char *)malloc(lbufsize*2);
-        f->bufsize*=2;
         return io61_writec(f, ch);
     }
 }
@@ -255,7 +215,7 @@ ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
 //    an error occurred before any characters were written.
 
 ssize_t io61_write(io61_file *f, const char *buf, size_t sz) {
-    size_t bufsize=64*sz;
+    /*size_t bufsize=64*sz;
     // initialize the buffer
     if(f->bufsize==0) {
         f->buf=(char *)malloc(bufsize);
@@ -282,7 +242,17 @@ ssize_t io61_write(io61_file *f, const char *buf, size_t sz) {
             f->buf=(char *)malloc(f->bufsize);
         }
         return io61_write(f, buf, sz);
+    }*/
+    size_t nwritten = 0;
+    while (nwritten != sz) {
+        if (io61_writec(f, buf[nwritten]) == -1)
+        break;
+        ++nwritten;
     }
+    if (nwritten == 0 && sz != 0)
+        return -1;
+    else
+        return nwritten;
 }
 
 
@@ -295,13 +265,7 @@ int io61_seek(io61_file *f, size_t pos) {
         io61_flush(f);
     }
     else{
-        if(pos>=(size_t)f->fdoffset&&pos<(size_t)f->fdoffset+(size_t)f->bufsize)
-            f->offset=f->fdoffset-pos;
-        else{
-            ssize_t readchars=read(f->fd, &f->buf[f->offset], f->bufsize);
-            f->fdoffset=pos;
-            f->bufsize=readchars; 
-        }
+        f->offset=f->bufsize;
     }
     off_t r = lseek(f->fd, (off_t) pos, SEEK_SET);
     if (r == (off_t) pos)
