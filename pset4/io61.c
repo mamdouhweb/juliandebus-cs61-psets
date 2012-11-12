@@ -11,6 +11,7 @@
 
 struct io61_file {
     int fd;
+    int mode;
     // size of the file represented by fd
     ssize_t filesize;
     // holds cache/mmaped file
@@ -40,7 +41,7 @@ io61_file *io61_fdopen(int fd, int mode) {
     io61_file *f = (io61_file *) malloc(sizeof(io61_file));
     f->fd = fd;
     f->bufsize=0;
-    (void) mode;
+    f->mode=mode;
     return f;
 }
 
@@ -79,6 +80,7 @@ int io61_readc(io61_file *f) {
     // the buffer can still satisfy the request
     if (loffset<lbufsize){
         if (f->buf[loffset] != EOF){
+            ++f->fdoffset;
             return f->buf[loffset];
         }
         else{
@@ -111,7 +113,7 @@ int io61_readc(io61_file *f) {
         }
         ssize_t readchars=read(f->fd, f->buf, f->bufsize);
         if(readchars==-1){
-            fprintf(stderr,"Error: %s\n",strerror(errno));
+            fprintf(stderr,"Error: %s\n", strerror(errno));
         }
         assert(readchars!=-1);
         //fprintf(stderr,"Read: %zu\n",readchars);
@@ -160,7 +162,7 @@ int io61_writec(io61_file *f, int ch) {
 //    Forces a write of any `f` buffers that contain data.
 
 int io61_flush(io61_file *f) {
-    if (f->offset>0) {
+    if (f->offset>0&&f->mode==O_WRONLY) {
         write(f->fd, f->buf, f->offset);
         f->offset=0;
     }
@@ -176,8 +178,8 @@ int io61_flush(io61_file *f) {
 
 ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
     //fprintf(stderr,"Read Request for %zu bytes\n", sz);
-    /*
     // initialize the buffer
+    /*
     if (f->bufsize==0) {
         f->buf=(char *)malloc(PAGESIZE);
         f->bufsize=PAGESIZE;
@@ -202,9 +204,14 @@ ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
     // The request can only be partially satisfied
     // (The remaining chars in buffer are < sz)
     else if (f->bufDidSlurpFile) {
-        memcpy(buf, &f->buf[f->offset], f->bufsize-f->offset);
-        f->offset+=f->bufsize-f->offset;
-        return f->bufsize-f->offset;
+        if (f->bufsize==f->offset){
+            assert(0);
+            return 0;
+        }
+        ssize_t charsToCopy=f->bufsize-f->offset;
+        memcpy(buf, &f->buf[f->offset], charsToCopy);
+        f->offset=f->bufsize;
+        return charsToCopy;
     }
     // the buffer needs to be refilled
     else {
@@ -224,7 +231,8 @@ ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
             f->bufsize=readchars;
         }
         return io61_read(f,buf,sz);
-    }*/
+    }
+    */
     size_t nread = 0;
     while (nread != sz) {
         int ch = io61_readc(f);
@@ -233,6 +241,7 @@ ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
         buf[nread] = ch;
         ++nread;
     }
+    f->fdoffset+=nread;
     if (nread == 0 && sz != 0)
         return -1;
     else
@@ -282,7 +291,18 @@ ssize_t io61_write(io61_file *f, const char *buf, size_t sz) {
 //    Returns 0 on success and -1 on failure.
 
 int io61_seek(io61_file *f, size_t pos) {
-    io61_flush(f);
+    if (f->mode==O_WRONLY){
+        io61_flush(f);
+    }
+    else{
+        if(pos>=(size_t)f->fdoffset&&pos<(size_t)f->fdoffset+(size_t)f->bufsize)
+            f->offset=f->fdoffset-pos;
+        else{
+            ssize_t readchars=read(f->fd, &f->buf[f->offset], f->bufsize);
+            f->fdoffset=pos;
+            f->bufsize=readchars; 
+        }
+    }
     off_t r = lseek(f->fd, (off_t) pos, SEEK_SET);
     if (r == (off_t) pos)
         return 0;
