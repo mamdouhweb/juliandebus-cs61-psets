@@ -80,8 +80,8 @@ io61_cache *buildCacheForPos(io61_file *f, size_t pos) {
     io61_cache *newCache=freeCache(f);
     newCache->buf=malloc(PAGESIZE);
     //pread(int d, void *buf, size_t nbyte, off_t offset);
-    // This doesn't work on non-seekable files :(
     ssize_t readchars=pread(f->fd, newCache->buf, PAGESIZE, (off_t)pos);
+    // The file is not seekable, just read sequentially and hope we don't get caught
     if (readchars==-1) {
         readchars=read(f->fd, newCache->buf, PAGESIZE);
     }
@@ -274,8 +274,10 @@ int io61_seek(io61_file *f, size_t pos) {
         io61_flush(f);
     }
     else{
-        // force a reload of the cache
-        f->offset=f->bufsize;
+        if(!getCacheForPos(f, pos))
+            buildCacheForPos(f, pos);
+        io61_cache *currentCache=getCurrentCache(f);
+        currentCache->offset=pos-currentCache->pos;
     }
     off_t r = lseek(f->fd, (off_t) pos, SEEK_SET);
     if (r == (off_t) pos)
