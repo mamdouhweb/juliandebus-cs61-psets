@@ -66,7 +66,7 @@ struct io61_file {
 };
 
 io61_cache *freeCache(io61_file *f) {
-    int oldestCache;
+    int oldestCache=0;
     int maxLifetime = -1;
     for (int i=0;i<NCACHES;++i) {
         io61_cache *currentCache=&f->caches[i];
