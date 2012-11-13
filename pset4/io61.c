@@ -264,16 +264,42 @@ ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
 //    an error occurred before any characters were written.
 
 ssize_t io61_write(io61_file *f, const char *buf, size_t sz) {
-    size_t nwritten = 0;
-    while (nwritten != sz) {
-        if (io61_writec(f, buf[nwritten]) == -1)
-        break;
-        ++nwritten;
+    if (getCurrentCache(f)==NULL) {
+        f->currentCache=0;
+        f->caches[0].buf=malloc(PAGESIZE);
+        f->caches[0].bufsize=PAGESIZE;
+        f->caches[0].offset=0;
     }
-    if (nwritten == 0 && sz != 0)
-        return -1;
-    else
+    io61_cache *currentCache=getCurrentCache(f);
+    // fill the buffer
+    if (currentCache->offset<currentCache->bufsize) {
+        size_t nwritten = 0;
+        size_t cycleWrite = 0;
+        while (nwritten!=sz) {
+            cycleWrite = sz>(currentCache->bufsize-currentCache->offset)?currentCache->bufsize:sz;
+            memcpy(&currentCache->buf[currentCache->offset],buf,cycleWrite); 
+            nwritten+=cycleWrite;
+            currentCache->offset+=cycleWrite;
+            if (currentCache->offset==currentCache->bufsize)
+                io61_flush(f);
+        }
         return nwritten;
+    }
+    // flush the buffer
+    else {
+        io61_flush(f);
+        return io61_write(f, buf, sz);
+    }
+//    size_t nwritten = 0;
+//    while (nwritten != sz) {
+//        if (io61_writec(f, buf[nwritten]) == -1)
+//        break;
+//        ++nwritten;
+//    }
+//    if (nwritten == 0 && sz != 0)
+//        return -1;
+//    else
+//        return nwritten;
 }
 
 
