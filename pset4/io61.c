@@ -130,7 +130,7 @@ io61_cache *getCacheForPos(io61_file *f, size_t pos) {
 
 io61_cache *getCurrentCache(io61_file *f) {
     if (f->currentCache==-1)
-        return (io61_cache *)0;
+        return NULL;
     return &f->caches[f->currentCache]; 
 }
 
@@ -286,13 +286,19 @@ int io61_seek(io61_file *f, size_t pos) {
         io61_flush(f);
     }
     else{
+        io61_cache *cache=getCurrentCache(f);
+        if (cache){
+            ssize_t delta=pos-(cache->pos+cache->offset-1);
+            if(delta==-1&&!getCacheForPos(f,pos+delta)){
+                buildCacheForPos(f, pos<PAGESIZE?0:pos+1-PAGESIZE);
+            }
+        }
         // if no cache can be used, build a new one
         if(!getCacheForPos(f, pos)){
-            //fprintf(stderr,"Building cache at %zu\n",pos);
+            //fprintf(stderr,"Building Cache @%zu\n",pos);
             buildCacheForPos(f, pos);
         }
         io61_cache *currentCache=getCurrentCache(f);
-        //size_t delta=pos-(currentCache->pos+currentCache->offset);
         //posix_fadvise(f->fd, pos+delta, PAGESIZE, POSIX_FADV_NORMAL);
         currentCache->offset=pos-currentCache->pos;
     }
