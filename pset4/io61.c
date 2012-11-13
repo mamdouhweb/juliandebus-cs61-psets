@@ -3,17 +3,24 @@
 #include <sys/stat.h>
 #include <limits.h>
 #include <errno.h>
+#include <fcntl.h>
+//#include <unistd.h>
+//#include <linux/include/linux/fadvise.h>
+//#define _XOPEN_SOURCE 600
+
 
 #define PAGESIZE (4<<10)
 #define NCACHES 5
+
+int posix_fadvise( int fd, off_t offset, off_t len, int advice );
 
 // io61_file
 //    Data structure for io61 file wrappers. Add your own stuff.
 
 typedef enum cache_status{
-    CACHE_EMPTY   = 1,
-    CACHE_ACTIVE  = 2,
-    CACHE_DRAINED = 4
+    CACHE_EMPTY   = 0,
+    CACHE_ACTIVE  = 1,
+    CACHE_DRAINED = 2
 }cache_state;
 
 typedef struct io61_cache {
@@ -63,19 +70,23 @@ io61_cache *freeCache(io61_file *f) {
     int maxLifetime = -1;
     for (int i=0;i<NCACHES;++i) {
         io61_cache *currentCache=&f->caches[i];
-        if (currentCache->state&(CACHE_EMPTY|CACHE_DRAINED))
-            return currentCache; 
-        oldestCache=currentCache->lifetime>maxLifetime?i:oldestCache;
+        if (currentCache->state==CACHE_EMPTY||currentCache->state==CACHE_DRAINED)
+            return currentCache;
+        if (currentCache->lifetime>maxLifetime) {
+            oldestCache=i;
+            maxLifetime=currentCache->lifetime;
+        }
     }
+    //fprintf(stderr,"I have found a Cache! #%d LT%d\n",oldestCache, maxLifetime);
     // This cache has been in use and thus has a malloced buf
-    if (f->caches[oldestCache].state&CACHE_ACTIVE)
+    if (f->caches[oldestCache].state==CACHE_ACTIVE)
         free(f->caches[oldestCache].buf);
     return &f->caches[oldestCache];
 }
 
 // buildCacheForPos(io61_file *f, size_t pos) -- creates a io61_cache element
 //      and inserts it into the array. Returns a pointer to the created io61_cache element or
-//      -1 on error(EOF). The least recently used element may be evicted. 
+//      NULL on error(EOF). The least recently used element may be evicted. 
 io61_cache *buildCacheForPos(io61_file *f, size_t pos) {
     io61_cache *newCache=freeCache(f);
     newCache->buf=malloc(PAGESIZE);
@@ -89,7 +100,7 @@ io61_cache *buildCacheForPos(io61_file *f, size_t pos) {
     // if nothing can be read into the buffer, return -1
     if (readchars==0) {
         newCache->state=CACHE_EMPTY;
-        return (io61_cache *)-1;
+        return NULL;
     }
     newCache->bufsize=readchars;
     newCache->pos=pos;
@@ -104,9 +115,13 @@ io61_cache *getCacheForPos(io61_file *f, size_t pos) {
     io61_cache *foundCache=0;
     for (int i=0;i<NCACHES;++i) {
         io61_cache *currentCache=&f->caches[i];
-        if (!foundCache&&currentCache->pos>=pos&&currentCache->pos+currentCache->bufsize<pos){
-            f->currentCache=currentCache-f->caches;
+        if ((!foundCache && currentCache->state == CACHE_ACTIVE)
+                &&
+           (currentCache->pos<=pos && currentCache->pos+currentCache->bufsize>pos)
+           ){
+            f->currentCache=i;
             foundCache=currentCache;
+            --foundCache->lifetime;
         }
         ++currentCache->lifetime;
     }
@@ -157,22 +172,20 @@ int io61_readc(io61_file *f) {
     // initialize the buffer
     if (getCurrentCache(f)==0) {
         // this sets the current cache
-        if(buildCacheForPos(f,0)==(io61_cache *)-1)
+        if(buildCacheForPos(f,0)==NULL)
             return EOF;
     }
     io61_cache *currentCache=getCurrentCache(f);
-    //fprintf(stderr,"Offset: %zu Size: %zu\n",currentCache->offset,currentCache->bufsize);
     // The current buffer can still satisfy the request
     if (currentCache->offset<currentCache->bufsize) {
         char returnChar=currentCache->buf[currentCache->offset];
-        //fprintf(stderr,"%c",returnChar);
         ++currentCache->offset;
         return returnChar;
     }
     else {
         // Request a new cache that covers the next bytes
         // Here we could give the OS prefetching advice
-        if(buildCacheForPos(f,currentCache->pos+currentCache->offset)==(io61_cache *)-1)
+        if(buildCacheForPos(f,currentCache->pos+currentCache->offset)==NULL)
             return EOF;
         return io61_readc(f);
     }
@@ -214,7 +227,6 @@ int io61_flush(io61_file *f) {
     for (int i=0;i<NCACHES;++i) {
         io61_cache *currentCache=&f->caches[i];
         if (currentCache->offset>0) {
-//            fprintf(stderr,"FLUSH!\n");
             write(f->fd, currentCache->buf, currentCache->offset);
             currentCache->offset=0;
         }
@@ -274,9 +286,14 @@ int io61_seek(io61_file *f, size_t pos) {
         io61_flush(f);
     }
     else{
-        if(!getCacheForPos(f, pos))
+        // if no cache can be used, build a new one
+        if(!getCacheForPos(f, pos)){
+            //fprintf(stderr,"Building cache at %zu\n",pos);
             buildCacheForPos(f, pos);
+        }
         io61_cache *currentCache=getCurrentCache(f);
+        //size_t delta=pos-(currentCache->pos+currentCache->offset);
+        //posix_fadvise(f->fd, pos+delta, PAGESIZE, POSIX_FADV_NORMAL);
         currentCache->offset=pos-currentCache->pos;
     }
     off_t r = lseek(f->fd, (off_t) pos, SEEK_SET);
