@@ -14,8 +14,7 @@
 
 typedef enum cache_status{
     CACHE_EMPTY   = 0,
-    CACHE_ACTIVE  = 1,
-    CACHE_DRAINED = 2
+    CACHE_ACTIVE  = 1
 }cache_state;
 
 typedef struct io61_cache {
@@ -59,7 +58,7 @@ io61_cache *freeCache(io61_file *f) {
     int maxLifetime = -1;
     for (int i=0;i<NCACHES;++i) {
         io61_cache *currentCache=&f->caches[i];
-        if (currentCache->state==CACHE_EMPTY||currentCache->state==CACHE_DRAINED)
+        if (currentCache->state==CACHE_EMPTY)
             return currentCache;
         if (currentCache->lifetime>maxLifetime) {
             oldestCache=i;
