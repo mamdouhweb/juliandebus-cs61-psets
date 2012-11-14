@@ -84,11 +84,15 @@ io61_cache *freeCache(io61_file *f) {
 io61_cache *buildCacheForPos(io61_file *f, size_t pos) {
     io61_cache *newCache=freeCache(f);
     newCache->buf=malloc(PAGESIZE);
-    //pread(int d, void *buf, size_t nbyte, off_t offset);
-    ssize_t readchars=pread(f->fd, newCache->buf, PAGESIZE, (off_t)pos);
-    // The file is not seekable, just read sequentially and hope we don't get caught
-    if (readchars==-1) {
+    ssize_t readchars;
+    if (f->filesize==-1) {
+        // The file is not seekable, just read sequentially
         readchars=read(f->fd, newCache->buf, PAGESIZE);
+    }
+    else {
+        // Here we can mmap the file rather than reading it!
+        //pread(int d, void *buf, size_t nbyte, off_t offset);
+        readchars=pread(f->fd, newCache->buf, PAGESIZE, (off_t)pos);
     }
     // if nothing can be read into the buffer, return -1
     if (readchars==0) {
@@ -140,6 +144,7 @@ io61_file *io61_fdopen(int fd, int mode) {
     f->bufsize=0;
     f->mode=mode;
     f->currentCache=-1;
+    f->filesize=io61_filesize(f);
     return f;
 }
 
