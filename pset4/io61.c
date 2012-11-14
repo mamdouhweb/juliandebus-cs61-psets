@@ -72,7 +72,6 @@ io61_cache *freeCache(io61_file *f) {
             maxLifetime=currentCache->lifetime;
         }
     }
-    //fprintf(stderr,"I have found a Cache! #%d LT%d\n",oldestCache, maxLifetime);
     // This cache has been in use and thus has a malloced buf
     if (f->caches[oldestCache].state==CACHE_ACTIVE)
         free(f->caches[oldestCache].buf);
@@ -91,7 +90,6 @@ io61_cache *buildCacheForPos(io61_file *f, size_t pos) {
     if (readchars==-1) {
         readchars=read(f->fd, newCache->buf, PAGESIZE);
     }
-    //fprintf(stderr,"Size: %zd %s\n",readchars,strerror(errno));
     // if nothing can be read into the buffer, return -1
     if (readchars==0) {
         newCache->state=CACHE_EMPTY;
@@ -330,7 +328,6 @@ int io61_seek(io61_file *f, size_t pos) {
         }
         // if no cache can be used, build a new one
         if(!getCacheForPos(f, pos)){
-            //fprintf(stderr,"Building Cache @%zu\n",pos);
             buildCacheForPos(f, pos);
         }
         io61_cache *currentCache=getCurrentCache(f);
