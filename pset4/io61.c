@@ -4,15 +4,10 @@
 #include <limits.h>
 #include <errno.h>
 #include <fcntl.h>
-//#include <unistd.h>
-//#include <linux/include/linux/fadvise.h>
-//#define _XOPEN_SOURCE 600
-
 
 #define PAGESIZE (4<<10)
 #define NCACHES 5
 
-int posix_fadvise( int fd, off_t offset, off_t len, int advice );
 
 // io61_file
 //    Data structure for io61 file wrappers. Add your own stuff.
