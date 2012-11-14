@@ -52,12 +52,6 @@ struct io61_file {
     ssize_t offset;
     // size of *buf
     ssize_t bufsize;
-//  // Set to true if buf contains the whole file f or holds the last chunk
-//  // of a file. Then, bufsize represents the size of the chunk in buf.
-//  int bufDidSlurpFile;
-//  // Bool indicating whether we're likely dealing with a pipe
-//  // and thus shouldn't expand the buffer futher
-//  //int shouldStopExpanding;
 };
 
 io61_cache *freeCache(io61_file *f) {
@@ -91,11 +85,11 @@ io61_cache *buildCacheForPos(io61_file *f, size_t pos) {
     }
     else {
         // Here we can mmap the file rather than reading it!
-        //pread(int d, void *buf, size_t nbyte, off_t offset);
+        // pread(int d, void *buf, size_t nbyte, off_t offset);
         readchars=pread(f->fd, newCache->buf, PAGESIZE, (off_t)pos);
     }
-    // if nothing can be read into the buffer, return -1
     if (readchars==0) {
+        // if nothing can be read into the buffer, return -1
         newCache->state=CACHE_EMPTY;
         return NULL;
     }
