@@ -237,19 +237,39 @@ int io61_flush(io61_file *f) {
 //    -1 an error occurred before any characters were read.
 
 ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
-    size_t nread = 0;
-    while (nread != sz) {
-        int ch = io61_readc(f);
-        if (ch == EOF)
-            break;
-        buf[nread] = ch;
-        ++nread;
+    // initialize the buffer
+    if (getCurrentCache(f)==0) {
+        // this sets the current cache
+        if(buildCacheForPos(f,0)==NULL)
+            return 0;
     }
-    f->fdoffset+=nread;
-    if (nread == 0 && sz != 0)
-        return -1;
-    else
+    io61_cache *currentCache=getCurrentCache(f);
+    // The current buffer can still satisfy the request
+    if (currentCache->offset<currentCache->bufsize) {
+        size_t nread = 0;
+        size_t cycleRead = 0;
+        size_t charsLeft = 0;
+        while (nread != sz) {
+            charsLeft = currentCache->bufsize-currentCache->offset;
+            cycleRead = (sz-nread)>charsLeft?charsLeft:(sz-nread);
+            memcpy(&buf[nread],&currentCache->buf[currentCache->offset],cycleRead); 
+            nread+=cycleRead;
+            currentCache->offset+=cycleRead;
+            if (currentCache->offset==currentCache->bufsize){
+                if(buildCacheForPos(f,currentCache->pos+currentCache->offset)==NULL)
+                    return nread;
+            }
+            assert(nread<=sz);
+        }
         return nread;
+    }
+    else {
+        // Request a new cache that covers the next bytes
+        // Here we could give the OS prefetching advice
+        if(buildCacheForPos(f,currentCache->pos+currentCache->offset)==NULL)
+            return 0;
+        return io61_read(f, buf, sz);
+    }
 }
 
 
@@ -273,14 +293,11 @@ ssize_t io61_write(io61_file *f, const char *buf, size_t sz) {
         size_t charsLeft = 0;
         while (nwritten!=sz) {
             charsLeft=currentCache->bufsize-currentCache->offset;
-            //fprintf(stderr,"Chars left %zd \t SZ %zd\n",charsLeft,sz);
             cycleWrite = (sz-nwritten)>charsLeft?charsLeft:(sz-nwritten);
             memcpy(&currentCache->buf[currentCache->offset],&buf[nwritten],cycleWrite); 
             nwritten+=cycleWrite;
-            //fprintf(stderr,"Nwritten %zd \t SZ %zd\n",nwritten,sz);
             currentCache->offset+=cycleWrite;
             if (currentCache->offset==currentCache->bufsize){
-                //fprintf(stderr,"Flush\n");
                 io61_flush(f);
             }
             assert(nwritten<=sz);
@@ -292,16 +309,6 @@ ssize_t io61_write(io61_file *f, const char *buf, size_t sz) {
         io61_flush(f);
         return io61_write(f, buf, sz);
     }
-//    size_t nwritten = 0;
-//    while (nwritten != sz) {
-//        if (io61_writec(f, buf[nwritten]) == -1)
-//        break;
-//        ++nwritten;
-//    }
-//    if (nwritten == 0 && sz != 0)
-//        return -1;
-//    else
-//        return nwritten;
 }
 
 
