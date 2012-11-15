@@ -149,6 +149,13 @@ int io61_close(io61_file *f) {
     io61_flush(f);
     int r = close(f->fd);
     f->bufsize=0;
+    for (int i=0;i<NCACHES;++i) {
+        io61_cache *currentCache=&f->caches[i];
+        if (currentCache->offset>0) {
+            free(currentCache->buf);
+            currentCache->state=CACHE_EMPTY;
+        }
+    }
     free(f->buf);
     free(f);
     return r;
@@ -277,8 +284,8 @@ ssize_t io61_read(io61_file *f, char *buf, size_t sz) {
 ssize_t io61_write(io61_file *f, const char *buf, size_t sz) {
     if (getCurrentCache(f)==NULL) {
         f->currentCache=0;
-        f->caches[0].buf=malloc(PAGESIZE);
-        f->caches[0].bufsize=PAGESIZE;
+        f->caches[0].buf=malloc(10*PAGESIZE);
+        f->caches[0].bufsize=10*PAGESIZE;
         f->caches[0].offset=0;
     }
     io61_cache *currentCache=getCurrentCache(f);
