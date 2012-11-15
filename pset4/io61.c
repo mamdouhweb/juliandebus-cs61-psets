@@ -65,9 +65,6 @@ io61_cache *freeCache(io61_file *f) {
             maxLifetime=currentCache->lifetime;
         }
     }
-    // This cache has been in use and thus has a malloced buf
-//    if (f->caches[oldestCache].state==CACHE_ACTIVE)
-//        free(f->caches[oldestCache].buf);
     return &f->caches[oldestCache];
 }
 
