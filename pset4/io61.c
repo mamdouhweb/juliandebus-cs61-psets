@@ -91,6 +91,7 @@ io61_cache *buildCacheForPos(io61_file *f, size_t pos) {
     if (readchars==0) {
         // if nothing can be read into the buffer, return -1
         newCache->state=CACHE_EMPTY;
+        free(newCache->buf);
         return NULL;
     }
     newCache->bufsize=readchars;
@@ -152,7 +153,7 @@ int io61_close(io61_file *f) {
     f->bufsize=0;
     for (int i=0;i<NCACHES;++i) {
         io61_cache *currentCache=&f->caches[i];
-        if (currentCache->state==CACHE_ACTIVE) {
+        if (currentCache->state) {
             free(currentCache->buf);
             currentCache->state=CACHE_EMPTY;
         }
@@ -200,6 +201,7 @@ int io61_writec(io61_file *f, int ch) {
         f->caches[0].buf=malloc(PAGESIZE);
         f->caches[0].bufsize=PAGESIZE;
         f->caches[0].offset=0;
+        f->caches[0].state=CACHE_ACTIVE;
     }
     io61_cache *currentCache=getCurrentCache(f);
     // fill the buffer
@@ -287,6 +289,7 @@ ssize_t io61_write(io61_file *f, const char *buf, size_t sz) {
         f->caches[0].buf=malloc(10*PAGESIZE);
         f->caches[0].bufsize=10*PAGESIZE;
         f->caches[0].offset=0;
+        f->caches[0].state=CACHE_ACTIVE;
     }
     io61_cache *currentCache=getCurrentCache(f);
     // fill the buffer
