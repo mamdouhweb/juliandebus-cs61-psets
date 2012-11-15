@@ -6,7 +6,7 @@
 #include <fcntl.h>
 
 #define PAGESIZE (4<<10)
-#define NCACHES 5
+#define NCACHES 10
 
 
 // io61_file
