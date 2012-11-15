@@ -66,8 +66,8 @@ io61_cache *freeCache(io61_file *f) {
         }
     }
     // This cache has been in use and thus has a malloced buf
-    if (f->caches[oldestCache].state==CACHE_ACTIVE)
-        free(f->caches[oldestCache].buf);
+//    if (f->caches[oldestCache].state==CACHE_ACTIVE)
+//        free(f->caches[oldestCache].buf);
     return &f->caches[oldestCache];
 }
 
@@ -76,7 +76,8 @@ io61_cache *freeCache(io61_file *f) {
 //      NULL on error(EOF). The least recently used element may be evicted. 
 io61_cache *buildCacheForPos(io61_file *f, size_t pos) {
     io61_cache *newCache=freeCache(f);
-    newCache->buf=malloc(PAGESIZE);
+    if (newCache->state==CACHE_EMPTY)
+        newCache->buf=malloc(PAGESIZE);
     ssize_t readchars;
     if (f->filesize==-1) {
         // The file is not seekable, just read sequentially
