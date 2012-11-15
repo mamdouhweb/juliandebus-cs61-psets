@@ -152,7 +152,7 @@ int io61_close(io61_file *f) {
     f->bufsize=0;
     for (int i=0;i<NCACHES;++i) {
         io61_cache *currentCache=&f->caches[i];
-        if (currentCache->state!=CACHE_ACTIVE) {
+        if (currentCache->state==CACHE_ACTIVE) {
             free(currentCache->buf);
             currentCache->state=CACHE_EMPTY;
         }
