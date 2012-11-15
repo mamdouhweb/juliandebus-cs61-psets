@@ -32,27 +32,24 @@ struct io61_file {
     // size of the file represented by fd
     ssize_t filesize;
     // Caches associated with file represented by fd
-    // Interaction shall only occur through 3 functions:
-    // getCurrentCache(io61_file *f) -- returns most recently used cache
-    // setCurrentCache(io61_file *f, io61_cache *cache) -- set
-    // buildCacheForPos(io61_file *f, size_t pos) -- creates a io61_cache element
-    //      and inserts it into the array. Returns a pointer to the created io61_cache element.
-    //      The least recently used element may be evicted. 
-    // getCacheForPos(io61_file *f, size_t pos) -- returns pointer to io61_cache
-    //      element on success and sets the current cache element, else 0
+    // Interaction should regularly happen through these functions: 
+    //    * freeCache(io61_file *f)
+    //    * getCurrentCache(io61_file *f)
+    //    * buildCacheForPos(io61_file *f, size_t pos)
+    //    * getCacheForPos(io61_file *f, size_t pos)
     io61_cache caches[NCACHES];
     // index into caches array, -1 if no current cache present
     int currentCache;
     // holds cache/mmaped file
     char *buf;
-    // offset within fd
-    ssize_t fdoffset;
     // offset of passed out/read in bytes within *buf
     ssize_t offset;
-    // size of *buf
+    // size of the memory region buf points to
     ssize_t bufsize;
 };
 
+// freeCache(io61_file *f) -- returns a pointer to either a free cache element 
+//      or the oldest used cache
 io61_cache *freeCache(io61_file *f) {
     int oldestCache=0;
     int maxLifetime = -1;
@@ -100,8 +97,11 @@ io61_cache *buildCacheForPos(io61_file *f, size_t pos) {
     return newCache;
 }
 
+// getCacheForPos(io61_file *f, size_t pos) -- returns a pointer to io61_cache
+//      element on success (a cache currently holds the memory at pos)
+//      and sets the found cache to be the current cache, else NULL
 io61_cache *getCacheForPos(io61_file *f, size_t pos) {
-    io61_cache *foundCache=0;
+    io61_cache *foundCache=NULL;
     for (int i=0;i<NCACHES;++i) {
         io61_cache *currentCache=&f->caches[i];
         if ((!foundCache && currentCache->state == CACHE_ACTIVE)
