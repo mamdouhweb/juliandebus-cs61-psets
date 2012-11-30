@@ -1,0 +1,10 @@
+*.o
+*~
+.deps
+access.log
+core*
+error.log
+files
+pong61
+pset.tgz
+serverconfig.js
