@@ -12,7 +12,7 @@
 #include "serverinfo.h"
 
 #define MIN(a,b) ((a) < (b) ? a : b)
-#define MINTIME 1000
+#define MINTIME 0.001
 
 static const char *pong_host = PONG_HOST;
 static const char *pong_port = PONG_PORT;
@@ -240,7 +240,7 @@ int main(int argc, char **argv) {
     // play game
     int x = 0, y = 0, dx = 1, dy = 1;
     char url[BUFSIZ];
-    useconds_t waittime;
+    double waittime;
     while (1) {
         waittime=0;
         http_connection *conn;
@@ -256,8 +256,8 @@ int main(int argc, char **argv) {
                 // Exponential backoff
                 waittime=waittime==0?MINTIME:2*waittime;
                 waittime=MIN(waittime,256*MINTIME);
-                fprintf(stderr,"Sleeping for %d ms\n",waittime/1000);
-                usleep(waittime);
+                fprintf(stderr,"Sleeping for %fs\n",waittime);
+                sleep_for(waittime);
             }
         } while(conn->status_code==-1);
 
