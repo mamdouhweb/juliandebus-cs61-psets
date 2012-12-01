@@ -11,6 +11,9 @@
 #include <assert.h>
 #include "serverinfo.h"
 
+#define MIN(a,b) ((a) < (b) ? a : b)
+#define MINTIME 1000
+
 static const char *pong_host = PONG_HOST;
 static const char *pong_port = PONG_PORT;
 static const char *pong_user = PONG_USER;
@@ -237,13 +240,27 @@ int main(int argc, char **argv) {
     // play game
     int x = 0, y = 0, dx = 1, dy = 1;
     char url[BUFSIZ];
+    useconds_t waittime;
     while (1) {
-        http_connection *conn = http_connect(ai);
+        waittime=0;
+        http_connection *conn;
+        do {
+            conn = http_connect(ai);
 
-        sprintf(url, "move?x=%d&y=%d&style=on", x, y);
-        http_send_request(conn, url);
+            sprintf(url, "move?x=%d&y=%d&style=on", x, y);
 
-        http_receive_response(conn);
+            http_send_request(conn, url);
+
+            http_receive_response(conn);
+            if(conn->status_code==-1){
+                // Exponential backoff
+                waittime=waittime==0?MINTIME:2*waittime;
+                waittime=MIN(waittime,256*MINTIME);
+                fprintf(stderr,"Sleeping for %d ms\n",waittime/1000);
+                usleep(waittime);
+            }
+        } while(conn->status_code==-1);
+
         if (conn->status_code != 200)
             fprintf(stderr, "warning: %d,%d: server returned status %d "
                     "(expected 200)\n", x, y, conn->status_code);
