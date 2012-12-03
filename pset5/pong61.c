@@ -10,9 +10,27 @@
 #include <signal.h>
 #include <assert.h>
 #include "serverinfo.h"
+#include <pthread.h>
 
 #define MIN(a,b) ((a) < (b) ? a : b)
 #define MINTIME 0.001
+
+pthread_mutex_t myLock;
+void *startConnection(void *con_info);
+
+typedef struct coord_info {
+    int x;
+    int y;
+    int dx;
+    int dy;
+    int width;
+    int height;
+} coord_info;
+
+typedef struct con_info {
+    struct addrinfo *ai;
+    struct coord_info *cd;
+} con_info;
 
 static const char *pong_host = PONG_HOST;
 static const char *pong_port = PONG_PORT;
@@ -238,21 +256,55 @@ int main(int argc, char **argv) {
     printf("Display: http://%s:%s/%s/\n", pong_host, pong_port, pong_user);
 
     // play game
-    int x = 0, y = 0, dx = 1, dy = 1;
+    // initialize con_info struct
+    coord_info cdi;
+    cdi.x=0;
+    cdi.y=0;
+    cdi.dx=1;
+    cdi.dy=1;
+    cdi.width=width;
+    cdi.height=height;
+    con_info ci;
+    ci.cd=&cdi;
+    ci.ai=ai;
+    
+    pthread_mutex_init(&myLock, NULL);
+    pthread_t thread1;
+    pthread_create(&thread1, NULL, startConnection, &ci);
+    pthread_join(thread1, NULL);
+}
+
+// ai, x,y,dx,dy
+
+void *startConnection(void *con_info){
+    struct con_info *ci;
+    ci = (struct con_info *)con_info;
     char url[BUFSIZ];
     double waittime;
     while (1) {
         waittime=0;
         http_connection *conn;
+        // lock here
+        ci->cd->x += ci->cd->dx;
+        ci->cd->y += ci->cd->dy;
+        if (ci->cd->x < 0 || ci->cd->x >= ci->cd->width) {
+            ci->cd->dx = -ci->cd->dx;
+            ci->cd->x += 2 * ci->cd->dx;
+        }
+        if (ci->cd->y < 0 || ci->cd->y >= ci->cd->height) {
+            ci->cd->dy = -ci->cd->dy;
+            ci->cd->y += 2 * ci->cd->dy;
+        }
+        sprintf(url, "move?x=%d&y=%d&style=on", ci->cd->x, ci->cd->y);
+        // unlock here
         do {
-            conn = http_connect(ai);
-
-            sprintf(url, "move?x=%d&y=%d&style=on", x, y);
-
+            conn = http_connect(ci->ai);
+            // Should I lock here?
             http_send_request(conn, url);
 
             http_receive_response(conn);
             if(conn->status_code==-1){
+                http_close(conn);
                 // Exponential backoff
                 waittime=waittime==0?MINTIME:2*waittime;
                 waittime=MIN(waittime,256*MINTIME);
@@ -263,7 +315,7 @@ int main(int argc, char **argv) {
 
         if (conn->status_code != 200)
             fprintf(stderr, "warning: %d,%d: server returned status %d "
-                    "(expected 200)\n", x, y, conn->status_code);
+                    "(expected 200)\n", ci->cd->x, ci->cd->y, conn->status_code);
 
         double result = strtod(conn->buf, NULL);
         if (result < 0) {
@@ -272,23 +324,12 @@ int main(int argc, char **argv) {
             exit(1);
         }
 
-        x += dx;
-        y += dy;
-        if (x < 0 || x >= width) {
-            dx = -dx;
-            x += 2 * dx;
-        }
-        if (y < 0 || y >= height) {
-            dy = -dy;
-            y += 2 * dy;
-        }
-
+        fprintf(stderr,"Weee\n");
         // wait 0.1sec before moving to next frame
         sleep_for(0.1);
         http_close(conn);
     }
 }
-
 
 // TIMING AND INTERRUPT FUNCTIONS
 static void handle_sigalrm(int signo);
