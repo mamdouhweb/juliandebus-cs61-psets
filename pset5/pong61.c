@@ -14,6 +14,7 @@
 
 #define MIN(a,b) ((a) < (b) ? a : b)
 #define MINTIME 0.001
+#define MAXTHREADS 30
 
 pthread_mutex_t myLock;
 void *startConnection(void *con_info);
@@ -167,8 +168,18 @@ void http_receive_response(http_connection *conn) {
 
     // parse connection (http_consume_headers tells us when to stop)
     size_t eof = 0;
+    double start=timestamp();
+    int reps = 0;
     while (http_consume_headers(conn, eof)) {
+        ++reps;
+        
+        if(reps>1)
+            // Here we should start a new thread.
+            fprintf(stderr,"Delayed Body\n");
+
         ssize_t nr = read(conn->fd, &conn->buf[conn->len], BUFSIZ);
+        if(timestamp()-start>0.05)
+            fprintf(stderr,"Delay: %fs\n",(timestamp()-start));
         if (nr == 0)
             eof = 1;
         else if (nr == -1 && errno != EINTR && errno != EAGAIN) {
@@ -268,10 +279,23 @@ int main(int argc, char **argv) {
     ci.cd=&cdi;
     ci.ai=ai;
     
+    //pthread_t threads[30];
     pthread_mutex_init(&myLock, NULL);
+    // for(int i=0;i<30;++i){
+    //     pthread_create(threads+i, NULL, startConnection, &ci);
+    //     sleep_for(0.1);  
+    // }
+
     pthread_t thread1;
+    // pthread_t thread2;
     pthread_create(&thread1, NULL, startConnection, &ci);
-    pthread_join(thread1, NULL);
+    // sleep_for(0.1);
+    // pthread_create(&thread2, NULL, startConnection, &ci);
+    
+    pthread_join(thread1, NULL); 
+    // for(int i=0;i<30;++i){
+    //     pthread_join(threads[i], NULL); 
+    // }
 }
 
 // ai, x,y,dx,dy
@@ -281,10 +305,13 @@ void *startConnection(void *con_info){
     ci = (struct con_info *)con_info;
     char url[BUFSIZ];
     double waittime;
+    int x,y;
     while (1) {
         waittime=0;
         http_connection *conn;
+
         // lock here
+        pthread_mutex_lock(&myLock);
         ci->cd->x += ci->cd->dx;
         ci->cd->y += ci->cd->dy;
         if (ci->cd->x < 0 || ci->cd->x >= ci->cd->width) {
@@ -295,7 +322,11 @@ void *startConnection(void *con_info){
             ci->cd->dy = -ci->cd->dy;
             ci->cd->y += 2 * ci->cd->dy;
         }
-        sprintf(url, "move?x=%d&y=%d&style=on", ci->cd->x, ci->cd->y);
+        x=ci->cd->x;
+        y=ci->cd->y;
+        pthread_mutex_unlock(&myLock);
+
+        sprintf(url, "move?x=%d&y=%d&style=on", x, y);
         // unlock here
         do {
             conn = http_connect(ci->ai);
@@ -324,7 +355,7 @@ void *startConnection(void *con_info){
             exit(1);
         }
 
-        fprintf(stderr,"Weee\n");
+        fprintf(stderr,"Weee x: %d, y: %d\n", x, y);
         // wait 0.1sec before moving to next frame
         sleep_for(0.1);
         http_close(conn);
