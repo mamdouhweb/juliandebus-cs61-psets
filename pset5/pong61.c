@@ -16,8 +16,15 @@
 #define MINTIME 0.001
 #define MAXTHREADS 30
 
+pthread_mutex_t threadLock;
 pthread_mutex_t myLock;
+void spawnThread(void *arg);
 void *startConnection(void *con_info);
+
+// global variable keeping track of the number of threads
+// maybe this could be wrapped into one function call
+int nthreads;
+pthread_t threads[MAXTHREADS];
 
 typedef struct coord_info {
     int x;
@@ -32,6 +39,8 @@ typedef struct con_info {
     struct addrinfo *ai;
     struct coord_info *cd;
 } con_info;
+
+con_info ci;
 
 static const char *pong_host = PONG_HOST;
 static const char *pong_port = PONG_PORT;
@@ -173,10 +182,13 @@ void http_receive_response(http_connection *conn) {
     while (http_consume_headers(conn, eof)) {
         ++reps;
         
-        if(reps>1)
-            // Here we should start a new thread.
+        if(reps>1){
+            // Here we should start a new thread. (Watch MaxThreads)
             fprintf(stderr,"Delayed Body\n");
-
+            //sleep_for(0.1);
+            //spawnThread(&ci);
+        }
+            
         ssize_t nr = read(conn->fd, &conn->buf[conn->len], BUFSIZ);
         if(timestamp()-start>0.05)
             fprintf(stderr,"Delay: %fs\n",(timestamp()-start));
@@ -275,28 +287,62 @@ int main(int argc, char **argv) {
     cdi.dy=1;
     cdi.width=width;
     cdi.height=height;
-    con_info ci;
+    
     ci.cd=&cdi;
     ci.ai=ai;
     
-    //pthread_t threads[30];
     pthread_mutex_init(&myLock, NULL);
-    // for(int i=0;i<30;++i){
-    //     pthread_create(threads+i, NULL, startConnection, &ci);
-    //     sleep_for(0.1);  
-    // }
 
-    pthread_t thread1;
-    // pthread_t thread2;
-    pthread_create(&thread1, NULL, startConnection, &ci);
-    // sleep_for(0.1);
-    // pthread_create(&thread2, NULL, startConnection, &ci);
+    pthread_mutex_init(&threadLock, NULL);
     
-    pthread_join(thread1, NULL); 
-    // for(int i=0;i<30;++i){
-    //     pthread_join(threads[i], NULL); 
-    // }
+    int locnthreads;
+    while(1){
+        pthread_mutex_lock(&threadLock);
+        locnthreads=nthreads;
+        pthread_mutex_unlock(&threadLock);
+        if(!(locnthreads>=30)){
+            pthread_t thread;
+            pthread_create(&thread, NULL, startConnection, &ci);
+            pthread_mutex_lock(&threadLock);
+            ++nthreads;
+            pthread_mutex_unlock(&threadLock);
+        }
+        sleep_for(0.1);
+    }
 }
+
+/*void spawnThread(void *arg){
+    pthread_mutex_lock(&threadLock);
+
+    if (nthreads>=20){
+        pthread_mutex_unlock(&threadLock);
+        return;
+    }
+
+    int foundSlot = 0;
+
+    pthread_t *thread;
+    
+    for(int i = 0; i < MAXTHREADS; ++i){
+        if(!threads[i]){
+            thread=threads+i;
+            foundSlot = 1;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&threadLock);
+
+    if(foundSlot){
+        pthread_create(thread, NULL, startConnection, arg);
+    
+        pthread_join(*thread, NULL); 
+        
+        pthread_mutex_lock(&threadLock);
+        --nthreads;
+        *thread=(pthread_t)0;
+        pthread_mutex_unlock(&threadLock);
+    }
+}*/
 
 // ai, x,y,dx,dy
 
@@ -306,7 +352,7 @@ void *startConnection(void *con_info){
     char url[BUFSIZ];
     double waittime;
     int x,y;
-    while (1) {
+    //while (1) {
         waittime=0;
         http_connection *conn;
 
@@ -356,10 +402,15 @@ void *startConnection(void *con_info){
         }
 
         fprintf(stderr,"Weee x: %d, y: %d\n", x, y);
-        // wait 0.1sec before moving to next frame
-        sleep_for(0.1);
+        // // wait 0.1sec before moving to next frame
+        // sleep_for(0.1);
         http_close(conn);
-    }
+        pthread_mutex_lock(&threadLock);
+        --nthreads;
+        pthread_mutex_unlock(&threadLock);
+        pthread_exit(NULL);
+        return NULL;
+    //}
 }
 
 // TIMING AND INTERRUPT FUNCTIONS
