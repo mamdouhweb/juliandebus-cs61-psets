@@ -11,6 +11,14 @@
 #include <assert.h>
 #include "serverinfo.h"
 #include <pthread.h>
+#include <time.h>
+
+#ifdef __MACH__
+#include <mach/clock.h>
+#include <mach/mach.h>
+#endif
+
+#define _POSIX_C_SOURCE >= 199309L
 
 #define MIN(a,b) ((a) < (b) ? a : b)
 #define MINTIME 0.001
@@ -18,6 +26,10 @@
 
 pthread_mutex_t threadLock;
 pthread_mutex_t myLock;
+pthread_mutex_t serverLock;
+
+pthread_cond_t  mySignal;
+
 void spawnThread(void *arg);
 void *startConnection(void *con_info);
 
@@ -183,10 +195,27 @@ void http_receive_response(http_connection *conn) {
         ++reps;
         
         if(reps>1){
+            struct timespec ts;
+            
+            // http://stackoverflow.com/questions/5167269/clock-gettime-alternative-in-mac-os-x
+            #ifdef __MACH__ // OS X does not have clock_gettime, use clock_get_time
+            clock_serv_t cclock;
+            mach_timespec_t mts;
+            host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
+            clock_get_time(cclock, &mts);
+            mach_port_deallocate(mach_task_self(), cclock);
+            ts.tv_sec = mts.tv_sec;
+            ts.tv_nsec = mts.tv_nsec;
+
+            #else
+            clock_gettime(CLOCK_REALTIME, &ts);
+            #endif
+
+            ts.tv_sec +=1;
+            //ts.tv_nsec += 1000*1000*1000;
             // Here we should start a new thread. (Watch MaxThreads)
             fprintf(stderr,"Delayed Body\n");
-            //sleep_for(0.1);
-            //spawnThread(&ci);
+            pthread_cond_timedwait(&mySignal, &serverLock, &ts);
         }
             
         ssize_t nr = read(conn->fd, &conn->buf[conn->len], BUFSIZ);
@@ -292,9 +321,11 @@ int main(int argc, char **argv) {
     ci.ai=ai;
     
     pthread_mutex_init(&myLock, NULL);
-
+    pthread_mutex_init(&serverLock, NULL);
     pthread_mutex_init(&threadLock, NULL);
     
+    pthread_cond_signal(&mySignal);
+
     int locnthreads;
     while(1){
         pthread_mutex_lock(&threadLock);
@@ -307,42 +338,9 @@ int main(int argc, char **argv) {
             ++nthreads;
             pthread_mutex_unlock(&threadLock);
         }
-        sleep_for(0.1);
+        //sleep_for(0.1);
     }
 }
-
-/*void spawnThread(void *arg){
-    pthread_mutex_lock(&threadLock);
-
-    if (nthreads>=20){
-        pthread_mutex_unlock(&threadLock);
-        return;
-    }
-
-    int foundSlot = 0;
-
-    pthread_t *thread;
-    
-    for(int i = 0; i < MAXTHREADS; ++i){
-        if(!threads[i]){
-            thread=threads+i;
-            foundSlot = 1;
-            break;
-        }
-    }
-    pthread_mutex_unlock(&threadLock);
-
-    if(foundSlot){
-        pthread_create(thread, NULL, startConnection, arg);
-    
-        pthread_join(*thread, NULL); 
-        
-        pthread_mutex_lock(&threadLock);
-        --nthreads;
-        *thread=(pthread_t)0;
-        pthread_mutex_unlock(&threadLock);
-    }
-}*/
 
 // ai, x,y,dx,dy
 
@@ -357,7 +355,7 @@ void *startConnection(void *con_info){
         http_connection *conn;
 
         // lock here
-        pthread_mutex_lock(&myLock);
+        pthread_mutex_lock(&serverLock);
         ci->cd->x += ci->cd->dx;
         ci->cd->y += ci->cd->dy;
         if (ci->cd->x < 0 || ci->cd->x >= ci->cd->width) {
@@ -370,10 +368,11 @@ void *startConnection(void *con_info){
         }
         x=ci->cd->x;
         y=ci->cd->y;
-        pthread_mutex_unlock(&myLock);
+        //pthread_mutex_unlock(&myLock);
 
         sprintf(url, "move?x=%d&y=%d&style=on", x, y);
         // unlock here
+        //pthread_mutex_lock(&serverLock);
         do {
             conn = http_connect(ci->ai);
             // Should I lock here?
@@ -389,6 +388,8 @@ void *startConnection(void *con_info){
                 sleep_for(waittime);
             }
         } while(conn->status_code==-1);
+        sleep_for(0.1);
+        pthread_mutex_unlock(&serverLock);
 
         if (conn->status_code != 200)
             fprintf(stderr, "warning: %d,%d: server returned status %d "
@@ -532,3 +533,36 @@ static void usage(void) {
     fprintf(stderr, "Usage: ./pong61 [-h HOST] [-p PORT] [USER]\n");
     exit(1);
 }
+
+/*void spawnThread(void *arg){
+    pthread_mutex_lock(&threadLock);
+
+    if (nthreads>=20){
+        pthread_mutex_unlock(&threadLock);
+        return;
+    }
+
+    int foundSlot = 0;
+
+    pthread_t *thread;
+    
+    for(int i = 0; i < MAXTHREADS; ++i){
+        if(!threads[i]){
+            thread=threads+i;
+            foundSlot = 1;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&threadLock);
+
+    if(foundSlot){
+        pthread_create(thread, NULL, startConnection, arg);
+    
+        pthread_join(*thread, NULL); 
+        
+        pthread_mutex_lock(&threadLock);
+        --nthreads;
+        *thread=(pthread_t)0;
+        pthread_mutex_unlock(&threadLock);
+    }
+}*/
