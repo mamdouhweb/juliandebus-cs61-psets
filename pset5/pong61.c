@@ -30,6 +30,8 @@ pthread_mutex_t serverLock;
 
 pthread_cond_t  receivedHeader;
 
+//http_connection connections[
+
 void spawnThread(void *arg);
 void *startConnection(void *con_info);
 
@@ -195,43 +197,12 @@ void http_receive_response(http_connection *conn) {
         ++reps;
         
         if(reps>1){
-            struct timespec ts;
-            
-            // http://stackoverflow.com/questions/5167269/clock-gettime-alternative-in-mac-os-x
-            #ifdef __MACH__ // OS X does not have clock_gettime, use clock_get_time
-            clock_serv_t cclock;
-            mach_timespec_t mts;
-            host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
-            clock_get_time(cclock, &mts);
-            mach_port_deallocate(mach_task_self(), cclock);
-            ts.tv_sec = mts.tv_sec;
-            ts.tv_nsec = mts.tv_nsec;
-
-            #else
-            clock_gettime(CLOCK_REALTIME, &ts);
-            #endif
-
-            ts.tv_sec +=2;
-            fprintf(stderr,"Delayed Body\n");
-
-            // int locnthreads;
-            // pthread_mutex_lock(&threadLock);
-            // locnthreads=nthreads;
-            // pthread_mutex_unlock(&threadLock);
-            // if(!(locnthreads>=30)){
-            //     fprintf(stderr,"Making new thread baby!\n");
-            //     pthread_t thread;
-            //     pthread_create(&thread, NULL, startConnection, &ci);
-            //     pthread_mutex_lock(&threadLock);
-            //     ++nthreads;
-            //     pthread_mutex_unlock(&threadLock);
-            // }
-
+            // Let someone else play with our lock
+            fprintf(stderr, "Unlocking Mutex: %f\n",timestamp());
             pthread_mutex_unlock(&serverLock);
         }
-            
         ssize_t nr = read(conn->fd, &conn->buf[conn->len], BUFSIZ);
-
+        
         if(timestamp()-start>0.05)
             fprintf(stderr,"Delay: %fs\n",(timestamp()-start));
         if (nr == 0)
@@ -252,8 +223,12 @@ void http_receive_response(http_connection *conn) {
                 conn->status_code, http_truncate_response(conn));
         exit(1);
     }
-    if(reps==1 && conn->status_code!=-1)
+    // if we are returning without delay or error -> release the lock
+    if(reps==1 && conn->status_code!=-1){
+        fprintf(stderr, "Unlocking Mutex: %f\n",timestamp());
+        fprintf(stderr, "%d\n",conn->status_code); 
         pthread_mutex_unlock(&serverLock);
+    }
 }
 
 
@@ -269,7 +244,15 @@ char *http_truncate_response(http_connection *conn) {
     return conn->buf;
 }
 
+/*
+void addConnToPool(http_connection conn) {
+    
+}
 
+http_connection *getConn(addrinfo ai){
+
+}
+*/
 // main(argc, argv)
 //    The main loop.
 int main(int argc, char **argv) {
@@ -339,28 +322,22 @@ int main(int argc, char **argv) {
     pthread_mutex_init(&serverLock, NULL);
     pthread_mutex_init(&threadLock, NULL);
     
-    //pthread_cond_init(&receivedHeader);
-
-    // while(1){
-    //     pthread_t thread;
-    //     ++nthreads;
-    //     pthread_create(&thread, NULL, startConnection, &ci);
-    //     pthread_join(thread,NULL);
-    // }
     int locnthreads;
     while(1){
+        sleep_for(0.01);
+
         pthread_mutex_lock(&threadLock);
         locnthreads=nthreads;
         pthread_mutex_unlock(&threadLock);
-        if(!(locnthreads>=30)){
-            fprintf(stderr,"Making new thread baby!\n");
+
+        if(locnthreads<MAXTHREADS){
+            //fprintf(stderr,"Making new thread baby!\n");
             pthread_t thread;
             pthread_create(&thread, NULL, startConnection, &ci);
             pthread_mutex_lock(&threadLock);
             ++nthreads;
             pthread_mutex_unlock(&threadLock);
         }
-        sleep_for(0.05);
     }
 }
 
@@ -375,9 +352,10 @@ void *startConnection(void *con_info){
     waittime=0;
     http_connection *conn;
 
+    fprintf(stderr, "Locking Mutex: %f\n",timestamp());
     pthread_mutex_lock(&serverLock);
     sleep_for(0.1);
-    fprintf(stderr,"Lock acquired\n");
+
     ci->cd->x += ci->cd->dx;
     ci->cd->y += ci->cd->dy;
     if (ci->cd->x < 0 || ci->cd->x >= ci->cd->width) {
@@ -534,6 +512,9 @@ static int http_consume_headers(http_connection *conn, int eof) {
         } else
             ++i;
     }
+    
+//    if(conn->status_code == 200)
+//        pthread_mutex_unlock(&serverLock);
 
     if (conn->state == HTTP_BODY
         && (conn->has_content_length || eof)
