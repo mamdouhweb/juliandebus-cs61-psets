@@ -28,7 +28,7 @@ pthread_mutex_t threadLock;
 pthread_mutex_t myLock;
 pthread_mutex_t serverLock;
 
-pthread_cond_t  mySignal;
+pthread_cond_t  receivedHeader;
 
 void spawnThread(void *arg);
 void *startConnection(void *con_info);
@@ -227,12 +227,11 @@ void http_receive_response(http_connection *conn) {
             //     pthread_mutex_unlock(&threadLock);
             // }
 
-            pthread_cond_timedwait(&mySignal, &serverLock, &ts);
+            pthread_mutex_unlock(&serverLock);
         }
             
-        pthread_mutex_unlock(&serverLock);
         ssize_t nr = read(conn->fd, &conn->buf[conn->len], BUFSIZ);
-        pthread_mutex_lock(&serverLock);
+
         if(timestamp()-start>0.05)
             fprintf(stderr,"Delay: %fs\n",(timestamp()-start));
         if (nr == 0)
@@ -253,6 +252,8 @@ void http_receive_response(http_connection *conn) {
                 conn->status_code, http_truncate_response(conn));
         exit(1);
     }
+    if(reps==1 && conn->status_code!=-1)
+        pthread_mutex_unlock(&serverLock);
 }
 
 
@@ -338,7 +339,7 @@ int main(int argc, char **argv) {
     pthread_mutex_init(&serverLock, NULL);
     pthread_mutex_init(&threadLock, NULL);
     
-    pthread_cond_signal(&mySignal);
+    //pthread_cond_init(&receivedHeader);
 
     // while(1){
     //     pthread_t thread;
@@ -407,7 +408,6 @@ void *startConnection(void *con_info){
             sleep_for(waittime);
         }
     } while(conn->status_code==-1);
-    pthread_mutex_unlock(&serverLock);
 
     if (conn->status_code != 200)
         fprintf(stderr, "warning: %d,%d: server returned status %d "
