@@ -211,14 +211,28 @@ void http_receive_response(http_connection *conn) {
             clock_gettime(CLOCK_REALTIME, &ts);
             #endif
 
-            ts.tv_sec +=1;
-            //ts.tv_nsec += 1000*1000*1000;
-            // Here we should start a new thread. (Watch MaxThreads)
+            ts.tv_sec +=2;
             fprintf(stderr,"Delayed Body\n");
+
+            // int locnthreads;
+            // pthread_mutex_lock(&threadLock);
+            // locnthreads=nthreads;
+            // pthread_mutex_unlock(&threadLock);
+            // if(!(locnthreads>=30)){
+            //     fprintf(stderr,"Making new thread baby!\n");
+            //     pthread_t thread;
+            //     pthread_create(&thread, NULL, startConnection, &ci);
+            //     pthread_mutex_lock(&threadLock);
+            //     ++nthreads;
+            //     pthread_mutex_unlock(&threadLock);
+            // }
+
             pthread_cond_timedwait(&mySignal, &serverLock, &ts);
         }
             
+        pthread_mutex_unlock(&serverLock);
         ssize_t nr = read(conn->fd, &conn->buf[conn->len], BUFSIZ);
+        pthread_mutex_lock(&serverLock);
         if(timestamp()-start>0.05)
             fprintf(stderr,"Delay: %fs\n",(timestamp()-start));
         if (nr == 0)
@@ -326,19 +340,26 @@ int main(int argc, char **argv) {
     
     pthread_cond_signal(&mySignal);
 
+    // while(1){
+    //     pthread_t thread;
+    //     ++nthreads;
+    //     pthread_create(&thread, NULL, startConnection, &ci);
+    //     pthread_join(thread,NULL);
+    // }
     int locnthreads;
     while(1){
         pthread_mutex_lock(&threadLock);
         locnthreads=nthreads;
         pthread_mutex_unlock(&threadLock);
         if(!(locnthreads>=30)){
+            fprintf(stderr,"Making new thread baby!\n");
             pthread_t thread;
             pthread_create(&thread, NULL, startConnection, &ci);
             pthread_mutex_lock(&threadLock);
             ++nthreads;
             pthread_mutex_unlock(&threadLock);
         }
-        //sleep_for(0.1);
+        sleep_for(0.05);
     }
 }
 
@@ -350,68 +371,65 @@ void *startConnection(void *con_info){
     char url[BUFSIZ];
     double waittime;
     int x,y;
-    //while (1) {
-        waittime=0;
-        http_connection *conn;
+    waittime=0;
+    http_connection *conn;
 
-        // lock here
-        pthread_mutex_lock(&serverLock);
-        ci->cd->x += ci->cd->dx;
-        ci->cd->y += ci->cd->dy;
-        if (ci->cd->x < 0 || ci->cd->x >= ci->cd->width) {
-            ci->cd->dx = -ci->cd->dx;
-            ci->cd->x += 2 * ci->cd->dx;
+    pthread_mutex_lock(&serverLock);
+    sleep_for(0.1);
+    fprintf(stderr,"Lock acquired\n");
+    ci->cd->x += ci->cd->dx;
+    ci->cd->y += ci->cd->dy;
+    if (ci->cd->x < 0 || ci->cd->x >= ci->cd->width) {
+        ci->cd->dx = -ci->cd->dx;
+        ci->cd->x += 2 * ci->cd->dx;
+    }
+    if (ci->cd->y < 0 || ci->cd->y >= ci->cd->height) {
+        ci->cd->dy = -ci->cd->dy;
+        ci->cd->y += 2 * ci->cd->dy;
+    }
+    x=ci->cd->x;
+    y=ci->cd->y;
+
+    sprintf(url, "move?x=%d&y=%d&style=on", x, y);
+
+    do {
+        conn = http_connect(ci->ai);
+
+        http_send_request(conn, url);
+        fprintf(stderr,"Receiving request\n");
+        http_receive_response(conn);
+        if(conn->status_code==-1){
+            http_close(conn);
+            // Exponential backoff
+            waittime=waittime==0?MINTIME:2*waittime;
+            waittime=MIN(waittime,256*MINTIME);
+            fprintf(stderr,"Sleeping for %fs\n",waittime);
+            sleep_for(waittime);
         }
-        if (ci->cd->y < 0 || ci->cd->y >= ci->cd->height) {
-            ci->cd->dy = -ci->cd->dy;
-            ci->cd->y += 2 * ci->cd->dy;
-        }
-        x=ci->cd->x;
-        y=ci->cd->y;
-        //pthread_mutex_unlock(&myLock);
+    } while(conn->status_code==-1);
+    pthread_mutex_unlock(&serverLock);
 
-        sprintf(url, "move?x=%d&y=%d&style=on", x, y);
-        // unlock here
-        //pthread_mutex_lock(&serverLock);
-        do {
-            conn = http_connect(ci->ai);
-            // Should I lock here?
-            http_send_request(conn, url);
+    if (conn->status_code != 200)
+        fprintf(stderr, "warning: %d,%d: server returned status %d "
+                "(expected 200)\n", ci->cd->x, ci->cd->y, conn->status_code);
 
-            http_receive_response(conn);
-            if(conn->status_code==-1){
-                http_close(conn);
-                // Exponential backoff
-                waittime=waittime==0?MINTIME:2*waittime;
-                waittime=MIN(waittime,256*MINTIME);
-                fprintf(stderr,"Sleeping for %fs\n",waittime);
-                sleep_for(waittime);
-            }
-        } while(conn->status_code==-1);
-        sleep_for(0.1);
-        pthread_mutex_unlock(&serverLock);
+    double result = strtod(conn->buf, NULL);
+    if (result < 0) {
+        fprintf(stderr, "server returned error: %s\n",
+                http_truncate_response(conn));
+        exit(1);
+    }
 
-        if (conn->status_code != 200)
-            fprintf(stderr, "warning: %d,%d: server returned status %d "
-                    "(expected 200)\n", ci->cd->x, ci->cd->y, conn->status_code);
+    fprintf(stderr,"Weee x: %d, y: %d\n", x, y);
 
-        double result = strtod(conn->buf, NULL);
-        if (result < 0) {
-            fprintf(stderr, "server returned error: %s\n",
-                    http_truncate_response(conn));
-            exit(1);
-        }
+    http_close(conn);
 
-        fprintf(stderr,"Weee x: %d, y: %d\n", x, y);
-        // // wait 0.1sec before moving to next frame
-        // sleep_for(0.1);
-        http_close(conn);
-        pthread_mutex_lock(&threadLock);
-        --nthreads;
-        pthread_mutex_unlock(&threadLock);
-        pthread_exit(NULL);
-        return NULL;
-    //}
+    pthread_mutex_lock(&threadLock);
+    --nthreads;
+    pthread_mutex_unlock(&threadLock);
+    
+    pthread_exit(NULL);
+    return NULL;
 }
 
 // TIMING AND INTERRUPT FUNCTIONS
