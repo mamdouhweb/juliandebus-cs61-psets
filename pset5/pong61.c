@@ -211,7 +211,6 @@ void http_receive_response(http_connection *conn) {
         
         if(reps>1){
             // Let someone else play with our lock
-            //fprintf(stderr, "Unlocking Mutex: %f\n",timestamp());
             pthread_mutex_unlock(&serverLock);
             pthread_mutex_unlock(&sendLock);
         }
@@ -233,7 +232,8 @@ void http_receive_response(http_connection *conn) {
         if(reps>1)
             pthread_mutex_lock(&sendLock);
         sleep_for(wait);
-        pthread_mutex_unlock(&sendLock);
+        if(reps>1)
+            pthread_mutex_unlock(&sendLock);
     }
     // null-terminate body
     conn->buf[conn->len] = 0;
@@ -246,10 +246,8 @@ void http_receive_response(http_connection *conn) {
     }
     // if we are returning without delay or error -> release the lock
     if(reps==1 && conn->status_code!=-1){
-        //fprintf(stderr, "Unlocking Mutex: %f\n",timestamp());
-        //fprintf(stderr, "%d\n",conn->status_code); 
         pthread_mutex_unlock(&serverLock);
-        //pthread_mutex_unlock(&sendLock);
+        pthread_mutex_unlock(&sendLock);
     }
 }
 
@@ -421,7 +419,6 @@ void *startConnection(void *con_info){
     waittime=0;
     http_connection *conn;
 
-    //fprintf(stderr, "Locking Mutex: %f\n",timestamp());
     pthread_mutex_lock(&serverLock);
     sleep_for(0.1);
 
@@ -446,7 +443,6 @@ void *startConnection(void *con_info){
         pthread_mutex_lock(&sendLock);
         http_send_request(conn, url);
         http_receive_response(conn);
-        pthread_mutex_unlock(&sendLock);
         if(conn->status_code==-1){
             releaseConn(conn);
             // Exponential backoff
@@ -454,6 +450,7 @@ void *startConnection(void *con_info){
             waittime=MIN(waittime,256*MINTIME);
             fprintf(stderr,"Sleeping for %fs\n",waittime);
             sleep_for(waittime);
+            pthread_mutex_unlock(&sendLock);
         }
     } while(conn->status_code==-1);
 
@@ -602,36 +599,3 @@ static void usage(void) {
     fprintf(stderr, "Usage: ./pong61 [-h HOST] [-p PORT] [USER]\n");
     exit(1);
 }
-
-/*void spawnThread(void *arg){
-    pthread_mutex_lock(&threadLock);
-
-    if (nthreads>=20){
-        pthread_mutex_unlock(&threadLock);
-        return;
-    }
-
-    int foundSlot = 0;
-
-    pthread_t *thread;
-    
-    for(int i = 0; i < MAXTHREADS; ++i){
-        if(!threads[i]){
-            thread=threads+i;
-            foundSlot = 1;
-            break;
-        }
-    }
-    pthread_mutex_unlock(&threadLock);
-
-    if(foundSlot){
-        pthread_create(thread, NULL, startConnection, arg);
-    
-        pthread_join(*thread, NULL); 
-        
-        pthread_mutex_lock(&threadLock);
-        --nthreads;
-        *thread=(pthread_t)0;
-        pthread_mutex_unlock(&threadLock);
-    }
-}*/
