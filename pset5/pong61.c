@@ -31,8 +31,6 @@ pthread_mutex_t sendLock;
 
 pthread_cond_t  receivedHeader;
 
-//http_connection connections[
-
 void spawnThread(void *arg);
 void *startConnection(void *con_info);
 
@@ -215,7 +213,7 @@ void http_receive_response(http_connection *conn) {
             // Let someone else play with our lock
             //fprintf(stderr, "Unlocking Mutex: %f\n",timestamp());
             pthread_mutex_unlock(&serverLock);
-            //pthread_mutex_unlock(&sendLock);
+            pthread_mutex_unlock(&sendLock);
         }
         ssize_t nr = read(conn->fd, &conn->buf[conn->len], BUFSIZ);
         
@@ -232,9 +230,10 @@ void http_receive_response(http_connection *conn) {
     double wait;
     if(sscanf(conn->buf,"+%lf\n",&wait)==1){
         fprintf(stderr, "WOO %f\n",wait);
-        //pthread_mutex_lock(&sendLock);
+        if(reps>1)
+            pthread_mutex_lock(&sendLock);
         sleep_for(wait);
-        //pthread_mutex_unlock(&sendLock);
+        pthread_mutex_unlock(&sendLock);
     }
     // null-terminate body
     conn->buf[conn->len] = 0;
@@ -444,10 +443,10 @@ void *startConnection(void *con_info){
     do {
         conn = getConn(ci->ai);
 
-        //pthread_mutex_lock(&sendLock);
+        pthread_mutex_lock(&sendLock);
         http_send_request(conn, url);
         http_receive_response(conn);
-        //pthread_mutex_unlock(&sendLock);
+        pthread_mutex_unlock(&sendLock);
         if(conn->status_code==-1){
             releaseConn(conn);
             // Exponential backoff
