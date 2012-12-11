@@ -23,10 +23,11 @@
 #define MIN(a,b) ((a) < (b) ? a : b)
 #define MINTIME 0.001
 #define MAXTHREADS 30
+#define NCONNECTIONS 30
 
 pthread_mutex_t threadLock;
-pthread_mutex_t myLock;
 pthread_mutex_t serverLock;
+pthread_mutex_t sendLock;
 
 pthread_cond_t  receivedHeader;
 
@@ -56,6 +57,7 @@ typedef struct con_info {
 
 con_info ci;
 
+
 static const char *pong_host = PONG_HOST;
 static const char *pong_port = PONG_PORT;
 static const char *pong_user = PONG_USER;
@@ -84,6 +86,19 @@ typedef struct http_connection {
     char buf[BUFSIZ];       // Response buffer
     size_t len;             // Length of response buffer
 } http_connection;
+
+typedef enum con_status {
+    CON_UNINIT = 0,
+    CON_VALID = 1,
+    CON_INUSE = 2
+}con_status;
+
+typedef struct con_avail{
+    struct http_connection *conn;
+    enum con_status status;
+}con_avail;
+
+con_avail sharedConnections[NCONNECTIONS];
 
 // `http_connection::state` constants:
 #define HTTP_REQUEST 0      // Request not sent yet
@@ -198,8 +213,9 @@ void http_receive_response(http_connection *conn) {
         
         if(reps>1){
             // Let someone else play with our lock
-            fprintf(stderr, "Unlocking Mutex: %f\n",timestamp());
+            //fprintf(stderr, "Unlocking Mutex: %f\n",timestamp());
             pthread_mutex_unlock(&serverLock);
+            //pthread_mutex_unlock(&sendLock);
         }
         ssize_t nr = read(conn->fd, &conn->buf[conn->len], BUFSIZ);
         
@@ -213,7 +229,13 @@ void http_receive_response(http_connection *conn) {
         } else if (nr != -1)
             conn->len += nr;
     }
-
+    double wait;
+    if(sscanf(conn->buf,"+%lf\n",&wait)==1){
+        fprintf(stderr, "WOO %f\n",wait);
+        //pthread_mutex_lock(&sendLock);
+        sleep_for(wait);
+        //pthread_mutex_unlock(&sendLock);
+    }
     // null-terminate body
     conn->buf[conn->len] = 0;
 
@@ -225,9 +247,10 @@ void http_receive_response(http_connection *conn) {
     }
     // if we are returning without delay or error -> release the lock
     if(reps==1 && conn->status_code!=-1){
-        fprintf(stderr, "Unlocking Mutex: %f\n",timestamp());
-        fprintf(stderr, "%d\n",conn->status_code); 
+        //fprintf(stderr, "Unlocking Mutex: %f\n",timestamp());
+        //fprintf(stderr, "%d\n",conn->status_code); 
         pthread_mutex_unlock(&serverLock);
+        //pthread_mutex_unlock(&sendLock);
     }
 }
 
@@ -244,15 +267,62 @@ char *http_truncate_response(http_connection *conn) {
     return conn->buf;
 }
 
-/*
-void addConnToPool(http_connection conn) {
+
+// return the slot of the connection object in the sharedConnections array
+int slotOfConnection(http_connection *conn) {
+    int connection = -1;
+    for(int i = 0; i<NCONNECTIONS; ++i){
+        if(sharedConnections[i].conn == conn) {
+            connection=i;
+        }
+    }
+    return connection;
+}
+
+// return a slot of a connection object with a certain status
+int connectionSlotWithStatus(con_status searchStatus) {
+    int connectionToReuse = -1;
+    for(int i = 0; i<NCONNECTIONS; ++i){
+        if(sharedConnections[i].status == searchStatus) {
+            connectionToReuse=i;
+        }
+    }
+    return connectionToReuse;
+}
+
+void releaseConn(http_connection *conn) {
+    int slot = slotOfConnection(conn);
+    if(conn->status_code==200) {
+        sharedConnections[slot].status = CON_VALID;
+    }
+    else {
+        sharedConnections[slot].status = CON_UNINIT;
+        http_close(conn);
+    } 
+}
+
+http_connection *getConn(const struct addrinfo *ai) {
+    // if a valid connection can be reused, do it
+    int connectionToReuse = connectionSlotWithStatus(CON_VALID);
+    if (connectionToReuse != (-1)) {
+        sharedConnections[connectionToReuse].status = CON_INUSE;
+        return sharedConnections[connectionToReuse].conn;
+    }
     
+    // look for an unused connection slot and populate it
+    int freeSlot = connectionSlotWithStatus(CON_UNINIT);
+    if(freeSlot != -1) {
+        sharedConnections[freeSlot].status = CON_INUSE;
+        sharedConnections[freeSlot].conn = http_connect(ai);
+        return sharedConnections[freeSlot].conn;
+    }
+    else {
+        // If no connection slot is free -> DOOM AWAITS!
+        assert(1);
+    }
+    return NULL;
 }
 
-http_connection *getConn(addrinfo ai){
-
-}
-*/
 // main(argc, argv)
 //    The main loop.
 int main(int argc, char **argv) {
@@ -318,9 +388,9 @@ int main(int argc, char **argv) {
     ci.cd=&cdi;
     ci.ai=ai;
     
-    pthread_mutex_init(&myLock, NULL);
     pthread_mutex_init(&serverLock, NULL);
     pthread_mutex_init(&threadLock, NULL);
+    pthread_mutex_init(&sendLock, NULL);
     
     int locnthreads;
     while(1){
@@ -352,7 +422,7 @@ void *startConnection(void *con_info){
     waittime=0;
     http_connection *conn;
 
-    fprintf(stderr, "Locking Mutex: %f\n",timestamp());
+    //fprintf(stderr, "Locking Mutex: %f\n",timestamp());
     pthread_mutex_lock(&serverLock);
     sleep_for(0.1);
 
@@ -372,13 +442,14 @@ void *startConnection(void *con_info){
     sprintf(url, "move?x=%d&y=%d&style=on", x, y);
 
     do {
-        conn = http_connect(ci->ai);
+        conn = getConn(ci->ai);
 
+        //pthread_mutex_lock(&sendLock);
         http_send_request(conn, url);
-        fprintf(stderr,"Receiving request\n");
         http_receive_response(conn);
+        //pthread_mutex_unlock(&sendLock);
         if(conn->status_code==-1){
-            http_close(conn);
+            releaseConn(conn);
             // Exponential backoff
             waittime=waittime==0?MINTIME:2*waittime;
             waittime=MIN(waittime,256*MINTIME);
@@ -400,7 +471,7 @@ void *startConnection(void *con_info){
 
     fprintf(stderr,"Weee x: %d, y: %d\n", x, y);
 
-    http_close(conn);
+    releaseConn(conn);
 
     pthread_mutex_lock(&threadLock);
     --nthreads;
