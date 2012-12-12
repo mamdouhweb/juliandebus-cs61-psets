@@ -200,31 +200,27 @@ void http_send_request(http_connection *conn, const char *uri) {
 //    body, which is `conn->len` bytes long and has been null-terminated.
 //    If the connection terminated prematurely, `conn->status_code`
 //    is -1.
-void http_receive_response(http_connection *conn) {
+void http_receive_response(http_connection *conn, int x, int y) {
     assert(conn->state != HTTP_REQUEST);
     if (conn->state < 0)
         return;
 
     // parse connection (http_consume_headers tells us when to stop)
     size_t eof = 0;
-    double start=timestamp();
     int reps = 0;
     int needToRelock = 0;
     while (http_consume_headers(conn, eof)) {
         ++reps;
-       
-       fprintf(stderr, "%d %d\n",reps,conn->state); 
+
         if((!needToRelock&&reps>1)&&conn->state!=HTTP_HEADERS){
             // Let someone else play with our lock
-            pthread_mutex_unlock(&serverLock);
             pthread_mutex_unlock(&sendLock);
+            pthread_mutex_unlock(&serverLock);
             needToRelock = 1;
         }
         assert(conn->len<49*BUFSIZ);
         ssize_t nr = read(conn->fd, &conn->buf[conn->len], BUFSIZ);
 
-        if(timestamp()-start>0.05)
-            fprintf(stderr,"Response was delayed by: %fs\n",(timestamp()-start));
         if (nr == 0)
             eof = 1;
         else if (nr == -1 && errno != EINTR && errno != EAGAIN) {
@@ -233,19 +229,22 @@ void http_receive_response(http_connection *conn) {
         } else if (nr != -1)
             conn->len += nr;
     }
+    // null-terminate body
+    conn->buf[conn->len] = 0;
+
     double wait;
     if(sscanf(conn->buf,"+%lf\n",&wait)==1){
-        fprintf(stderr, "Server begs for wait of: %fs\n",wait);
-        // If reps>1, we have already unlocked sendLock -> reacquire it
+        fprintf(stderr, "-----------------------\n");
+        fprintf(stderr, "Wait %fs (%d,%d)\n",wait, x, y);
+        fprintf(stderr, "-----------------------\n");
         if(needToRelock)
             pthread_mutex_lock(&sendLock);
         sleep_for(wait);
         if(needToRelock)
             pthread_mutex_unlock(&sendLock);
+        assert(conn->status_code!=-1);
+        //conn->status_code=200;
     }
-    // We need to make sure that conn->len doesn't exceed BUFISZ
-    // null-terminate body
-    conn->buf[conn->len] = 0;
 
     // Status codes >= 500 mean we are overloading the server and should exit.
     if (conn->status_code >= 500) {
@@ -255,9 +254,10 @@ void http_receive_response(http_connection *conn) {
     }
     // if we are returning without delay or error -> release the lock
     if(!needToRelock && conn->status_code!=-1){
-        pthread_mutex_unlock(&serverLock);
         pthread_mutex_unlock(&sendLock);
+        pthread_mutex_unlock(&serverLock);
     }
+    assert(!(needToRelock && conn->status_code==-1));
 }
 
 
@@ -302,11 +302,11 @@ void releaseConn(http_connection *conn) {
     pthread_mutex_lock(&connLock);
     int slot = slotOfConnection(conn);
     if(conn->status_code==200) {
-        fprintf(stderr, "Saving connection %d\n",slot);
+        //fprintf(stderr, "Saving connection %d\n",slot);
         sharedConnections[slot].status = CON_VALID;
     }
     else {
-        fprintf(stderr, "Trashing connection %d with http-status %d\n",slot, conn->status_code);
+        //fprintf(stderr, "Trashing connection %d with http-status %d\n",slot, conn->status_code);
         sharedConnections[slot].status = CON_UNINIT;
         http_close(conn);
     } 
@@ -319,7 +319,7 @@ http_connection *getConn(const struct addrinfo *ai) {
     int connectionToReuse = connectionSlotWithStatus(CON_VALID);
     if (connectionToReuse != (-1)) {
         sharedConnections[connectionToReuse].status = CON_INUSE;
-        fprintf(stderr, "Reusing connection %d\n",connectionToReuse);
+        //fprintf(stderr, "Reusing connection %d\n",connectionToReuse);
         pthread_mutex_unlock(&connLock);
         return sharedConnections[connectionToReuse].conn;
     }
@@ -328,7 +328,7 @@ http_connection *getConn(const struct addrinfo *ai) {
     int freeSlot = connectionSlotWithStatus(CON_UNINIT);
     if(freeSlot != -1) {
         sharedConnections[freeSlot].status = CON_INUSE;
-        fprintf(stderr, "New connection %d\n",freeSlot);
+        //fprintf(stderr, "New connection %d\n",freeSlot);
         sharedConnections[freeSlot].conn = http_connect(ai);
         pthread_mutex_unlock(&connLock);
         return sharedConnections[freeSlot].conn;
@@ -378,7 +378,7 @@ int main(int argc, char **argv) {
     {
         http_connection *conn = http_connect(ai);
         http_send_request(conn, "reset");
-        http_receive_response(conn);
+        http_receive_response(conn, -1, -1);
         if (conn->status_code != 200
             || sscanf(conn->buf, "%d %d\n", &width, &height) != 2
             || width <= 0 || height <= 0) {
@@ -458,26 +458,26 @@ void *startConnection(void *con_info){
 
     sprintf(url, "move?x=%d&y=%d&style=on", x, y);
 
-    do {
-        //pthread_mutex_lock(&connLock);
+    while (1) {
         conn = getConn(ci->ai);
-        //pthread_mutex_unlock(&connLock);
-
+        
         pthread_mutex_lock(&sendLock);
         http_send_request(conn, url);
-        http_receive_response(conn);
+        http_receive_response(conn, x, y);
         if(conn->status_code==-1) {
-            //pthread_mutex_lock(&connLock);
+            pthread_mutex_unlock(&sendLock);
             releaseConn(conn);
-            //pthread_mutex_unlock(&connLock);
             // Exponential backoff
             waittime=waittime==0?MINTIME:2*waittime;
             waittime=MIN(waittime,256*MINTIME);
-            fprintf(stderr,"Sleeping for %fs\n",waittime);
+            fprintf(stderr,"Sleeping for %fs (%d,%d) \n",waittime, x, y);
+            if(waittime==256*MINTIME){
+                fprintf(stderr,"\n");
+            }
             sleep_for(waittime);
-            pthread_mutex_unlock(&sendLock);
-        }
-    } while(conn->status_code==-1);
+        } else
+            break;
+    }
 
     if (conn->status_code != 200)
         fprintf(stderr, "warning: %d,%d: server returned status %d "
@@ -490,11 +490,7 @@ void *startConnection(void *con_info){
         exit(1);
     }
 
-    fprintf(stderr,"Weee x: %d, y: %d\n", x, y);
-
-    //pthread_mutex_lock(&connLock);
     releaseConn(conn);
-    //pthread_mutex_lock(&connLock);
 
     pthread_mutex_lock(&threadLock);
     --nthreads;
