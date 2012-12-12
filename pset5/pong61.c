@@ -209,13 +209,16 @@ void http_receive_response(http_connection *conn) {
     size_t eof = 0;
     double start=timestamp();
     int reps = 0;
+    int needToRelock = 0;
     while (http_consume_headers(conn, eof)) {
         ++reps;
-        
-        if(reps>1){
+       
+       fprintf(stderr, "%d %d\n",reps,conn->state); 
+        if((!needToRelock&&reps>1)&&conn->state!=HTTP_HEADERS){
             // Let someone else play with our lock
             pthread_mutex_unlock(&serverLock);
             pthread_mutex_unlock(&sendLock);
+            needToRelock = 1;
         }
         assert(conn->len<49*BUFSIZ);
         ssize_t nr = read(conn->fd, &conn->buf[conn->len], BUFSIZ);
@@ -234,10 +237,10 @@ void http_receive_response(http_connection *conn) {
     if(sscanf(conn->buf,"+%lf\n",&wait)==1){
         fprintf(stderr, "Server begs for wait of: %fs\n",wait);
         // If reps>1, we have already unlocked sendLock -> reacquire it
-        if(reps>1)
+        if(needToRelock)
             pthread_mutex_lock(&sendLock);
         sleep_for(wait);
-        if(reps>1)
+        if(needToRelock)
             pthread_mutex_unlock(&sendLock);
     }
     // We need to make sure that conn->len doesn't exceed BUFISZ
@@ -251,7 +254,7 @@ void http_receive_response(http_connection *conn) {
         exit(1);
     }
     // if we are returning without delay or error -> release the lock
-    if(reps==1 && conn->status_code!=-1){
+    if(!needToRelock && conn->status_code!=-1){
         pthread_mutex_unlock(&serverLock);
         pthread_mutex_unlock(&sendLock);
     }
