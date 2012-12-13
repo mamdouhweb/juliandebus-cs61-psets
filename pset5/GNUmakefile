@@ -3,7 +3,7 @@ all: $(PROGRAMS)
 
 CC = $(shell if test -f /opt/local/bin/gcc-mp-4.7; then \
 	    echo gcc-mp-4.7; else echo gcc; fi)
-CFLAGS := -std=gnu99 -g -W -Wall -Werror -O2
+CFLAGS := -std=gnu99 -g -W -Wall -Werror -O2 -pthread
 DEPCFLAGS = -MD -MF $(DEPSDIR)/$*.d -MP
 
 -include build/rules.mk
