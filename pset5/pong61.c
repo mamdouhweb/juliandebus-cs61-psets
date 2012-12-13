@@ -13,13 +13,6 @@
 #include <pthread.h>
 #include <time.h>
 
-#ifdef __MACH__
-#include <mach/clock.h>
-#include <mach/mach.h>
-#endif
-
-#define _POSIX_C_SOURCE >= 199309L
-
 #define MIN(a,b) ((a) < (b) ? a : b)
 #define MINTIME 0.001
 #define MAXTHREADS 30
@@ -61,7 +54,6 @@ static const char *pong_host = PONG_HOST;
 static const char *pong_port = PONG_PORT;
 static const char *pong_user = PONG_USER;
 
-
 // Timer and interrupt functions (defined and explained below)
 
 double timestamp(void);
@@ -82,16 +74,14 @@ typedef struct http_connection {
     size_t content_length;  // Content-Length value
     int has_content_length; // 1 iff Content-Length was provided
 
-    // Should this be dynamically allocated?
-    //char *buf;
     char buf[50*BUFSIZ];       // Response buffer
     size_t len;             // Length of response buffer
 } http_connection;
 
 typedef enum con_status {
-    CON_UNINIT = 0,
-    CON_VALID = 1,
-    CON_INUSE = 2
+    CON_UNINIT = 0, //The connection is unitialized
+    CON_VALID = 1,  //The connection is valid and can be reused
+    CON_INUSE = 2   //The connection is currently in use
 }con_status;
 
 typedef struct con_avail{
@@ -204,13 +194,16 @@ void http_receive_response(http_connection *conn) {
     if (conn->state < 0)
         return;
 
-    // parse connection (http_consume_headers tells us when to stop)
     size_t eof = 0;
     int reps = 0;
     int needToRelock = 0;
+
+    // parse connection (http_consume_headers tells us when to stop)
     while (http_consume_headers(conn, eof)) {
         ++reps;
 
+        // release the two mutexes once (and only once) if we are facing
+        // a delayed body
         if((!needToRelock&&reps>1)&&conn->state!=HTTP_HEADERS){
             pthread_mutex_unlock(&sendLock);
             pthread_mutex_unlock(&serverLock);
@@ -233,12 +226,12 @@ void http_receive_response(http_connection *conn) {
 
     double wait;
     if(sscanf(conn->buf,"+%lf\n",&wait)==1){
+        //If we need to stop sending, grab the sendLock mutex immediately
         if(needToRelock)
             pthread_mutex_lock(&sendLock);
         sleep_for(wait);
         if(needToRelock)
             pthread_mutex_unlock(&sendLock);
-        assert(conn->status_code!=-1);
     }
 
     // Status codes >= 500 mean we are overloading the server and should exit.
@@ -433,6 +426,7 @@ void *startConnection(void *con_info){
     waittime=0;
     http_connection *conn;
 
+    // This mutex enforces the notion of the 'ownership' of a position
     pthread_mutex_lock(&serverLock);
     sleep_for(0.1);
 
@@ -454,6 +448,7 @@ void *startConnection(void *con_info){
     while (1) {
         conn = getConn(ci->ai);
         
+        // this mutex enforces a 'as fast as possible' communication stop
         pthread_mutex_lock(&sendLock);
         http_send_request(conn, url);
         http_receive_response(conn);
