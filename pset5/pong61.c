@@ -200,7 +200,7 @@ void http_send_request(http_connection *conn, const char *uri) {
 //    body, which is `conn->len` bytes long and has been null-terminated.
 //    If the connection terminated prematurely, `conn->status_code`
 //    is -1.
-void http_receive_response(http_connection *conn, int x, int y) {
+void http_receive_response(http_connection *conn) {
     if (conn->state < 0)
         return;
 
@@ -371,7 +371,7 @@ int main(int argc, char **argv) {
     {
         http_connection *conn = http_connect(ai);
         http_send_request(conn, "reset");
-        http_receive_response(conn, -1, -1);
+        http_receive_response(conn);
         if (conn->status_code != 200
             || sscanf(conn->buf, "%d %d\n", &width, &height) != 2
             || width <= 0 || height <= 0) {
@@ -456,7 +456,7 @@ void *startConnection(void *con_info){
         
         pthread_mutex_lock(&sendLock);
         http_send_request(conn, url);
-        http_receive_response(conn, x, y);
+        http_receive_response(conn);
 
         // Exponential backoff
         if(conn->status_code==-1) {
