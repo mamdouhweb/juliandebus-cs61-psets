@@ -201,7 +201,6 @@ void http_send_request(http_connection *conn, const char *uri) {
 //    If the connection terminated prematurely, `conn->status_code`
 //    is -1.
 void http_receive_response(http_connection *conn, int x, int y) {
-    assert(conn->state != HTTP_REQUEST);
     if (conn->state < 0)
         return;
 
@@ -213,11 +212,11 @@ void http_receive_response(http_connection *conn, int x, int y) {
         ++reps;
 
         if((!needToRelock&&reps>1)&&conn->state!=HTTP_HEADERS){
-            // Let someone else play with our lock
             pthread_mutex_unlock(&sendLock);
             pthread_mutex_unlock(&serverLock);
             needToRelock = 1;
         }
+        // If we can't fit BUFSIZ into the buffer -> crash
         assert(conn->len<49*BUFSIZ);
         ssize_t nr = read(conn->fd, &conn->buf[conn->len], BUFSIZ);
 
@@ -234,16 +233,12 @@ void http_receive_response(http_connection *conn, int x, int y) {
 
     double wait;
     if(sscanf(conn->buf,"+%lf\n",&wait)==1){
-        fprintf(stderr, "-----------------------\n");
-        fprintf(stderr, "Wait %fs (%d,%d)\n",wait, x, y);
-        fprintf(stderr, "-----------------------\n");
         if(needToRelock)
             pthread_mutex_lock(&sendLock);
         sleep_for(wait);
         if(needToRelock)
             pthread_mutex_unlock(&sendLock);
         assert(conn->status_code!=-1);
-        //conn->status_code=200;
     }
 
     // Status codes >= 500 mean we are overloading the server and should exit.
@@ -298,28 +293,27 @@ int connectionSlotWithStatus(con_status searchStatus) {
     return connectionToReuse;
 }
 
+// release the connection conn (it will be reused if it is still valid)
 void releaseConn(http_connection *conn) {
     pthread_mutex_lock(&connLock);
     int slot = slotOfConnection(conn);
     if(conn->status_code==200) {
-        //fprintf(stderr, "Saving connection %d\n",slot);
         sharedConnections[slot].status = CON_VALID;
     }
     else {
-        //fprintf(stderr, "Trashing connection %d with http-status %d\n",slot, conn->status_code);
         sharedConnections[slot].status = CON_UNINIT;
         http_close(conn);
     } 
     pthread_mutex_unlock(&connLock);
 }
 
+// return a valid connection for ai
 http_connection *getConn(const struct addrinfo *ai) {
     pthread_mutex_lock(&connLock);
     // if a valid connection can be reused, do it
     int connectionToReuse = connectionSlotWithStatus(CON_VALID);
     if (connectionToReuse != (-1)) {
         sharedConnections[connectionToReuse].status = CON_INUSE;
-        //fprintf(stderr, "Reusing connection %d\n",connectionToReuse);
         pthread_mutex_unlock(&connLock);
         return sharedConnections[connectionToReuse].conn;
     }
@@ -328,7 +322,6 @@ http_connection *getConn(const struct addrinfo *ai) {
     int freeSlot = connectionSlotWithStatus(CON_UNINIT);
     if(freeSlot != -1) {
         sharedConnections[freeSlot].status = CON_INUSE;
-        //fprintf(stderr, "New connection %d\n",freeSlot);
         sharedConnections[freeSlot].conn = http_connect(ai);
         pthread_mutex_unlock(&connLock);
         return sharedConnections[freeSlot].conn;
@@ -464,16 +457,13 @@ void *startConnection(void *con_info){
         pthread_mutex_lock(&sendLock);
         http_send_request(conn, url);
         http_receive_response(conn, x, y);
+
+        // Exponential backoff
         if(conn->status_code==-1) {
             pthread_mutex_unlock(&sendLock);
             releaseConn(conn);
-            // Exponential backoff
             waittime=waittime==0?MINTIME:2*waittime;
             waittime=MIN(waittime,256*MINTIME);
-            fprintf(stderr,"Sleeping for %fs (%d,%d) \n",waittime, x, y);
-            if(waittime==256*MINTIME){
-                fprintf(stderr,"\n");
-            }
             sleep_for(waittime);
         } else
             break;
