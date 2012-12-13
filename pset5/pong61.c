@@ -29,7 +29,6 @@ void spawnThread(void *arg);
 void *startConnection(void *con_info);
 
 // global variable keeping track of the number of threads
-// maybe this could be wrapped into one function call
 int nthreads;
 pthread_t threads[MAXTHREADS];
 
@@ -48,7 +47,6 @@ typedef struct con_info {
 } con_info;
 
 con_info ci;
-
 
 static const char *pong_host = PONG_HOST;
 static const char *pong_port = PONG_PORT;
@@ -74,7 +72,7 @@ typedef struct http_connection {
     size_t content_length;  // Content-Length value
     int has_content_length; // 1 iff Content-Length was provided
 
-    char buf[50*BUFSIZ];       // Response buffer
+    char buf[50*BUFSIZ];    // Response buffer
     size_t len;             // Length of response buffer
 } http_connection;
 
